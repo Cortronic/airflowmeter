@@ -3,10 +3,8 @@
 #include <driver/ledc.h>
 #include <driver/dac.h>
 #include <Wire.h>
-#include <SensirionI2CSdp.h>
-// #include <Adafruit_ADS1X15.h>
-// #include <SH1106Wire.h>
-// #include <OLEDDisplayUi.h>
+#include "SensirionCore.h"
+#include "SensirionI2CSdp.h"
 #include <Adafruit_SH110X.h>
 #include <Fonts/Picopixel.h>
 #include <Adafruit_Sensor.h>
@@ -16,11 +14,11 @@
 #include <LittleFS.h>
 
 // Pin definitions
-const int PWM_FAN_PIN = 27;   // 12 = GPIO 32
+const int PWM_FAN_PIN = 27;  // 12 = GPIO 32
 const int PWM_CAL_PIN = 13;
-const int CAL_PIN = A0;   // GPIO 36 = A0 = VP
-const int ZERO_PIN = A6;  // GPIO 34 = A6
-const int FLOW_PIN = A7;  // GPIO 35 = A7, uses any valid Ax pin as you wish
+const int CAL_PIN = A0;      // GPIO 36 = A0 = VP
+const int ZERO_PIN = A6;    // GPIO 34 = A6
+const int FLOW_PIN = A7;    // GPIO 35 = A7, uses any valid Ax pin as you wish
 
 const int I2C_SDA0_PIN = 21;
 const int I2C_SCL0_PIN = 22;
@@ -40,8 +38,7 @@ const int CAL_FREQ = 5000;     // 5 KHz
 const int PWM_RESOLUTION = 10; // 10-bit resolution (0-1023)
 const int CAL_RESOLUTION = 12; // 12-bit resolution (0-4095)
 
-// Adafruit_ADS1115 ads;  /* Use this for the 16-bit version */
-// Adafruit_ADS1015 ads;     /* Use this for the 12-bit version */
+
 Smoothed<float> zeroPressure;
 Smoothed<float> flowPressure;
 Smoothed<float> adcCalibration;
@@ -52,6 +49,9 @@ Smoothed<float> humidityAmbient;
 // Twee hardware I2C bussen
 TwoWire I2C_A = TwoWire(0);
 TwoWire I2C_B = TwoWire(1);
+
+SensirionI2CSdp sdpZero;
+SensirionI2CSdp sdpFlow;
 
 // Initialize the OLED display using Wire library
 // ADDRESS, SDA, SCL  -  SDA and SCL usually populate automatically
@@ -66,10 +66,10 @@ int lookupTable[4096];
 int calibrateTable[4096];
 
 // Define Variables we'll be connecting to
-double Setpoint = 2230, Input, Output;
+double Setpoint, Input, Output;
 
 // Specify the links and initial tuning parameters
-double Kp=0.2, Ki=0.5, Kd=0;
+double Kp=10, Ki=3, Kd=1;
 PID myPID(&Input, &Output, &Setpoint, Kp, Ki, Kd, REVERSE);
 
 float offsetZero;
@@ -78,6 +78,7 @@ float offsetFlow;
 static void  initDisplay(void);
 static void  displayMeasurements();
 static void  initBME280();
+static void  initSDP(SensirionI2CSdp&, TwoWire&);
 static float calculateFlow(float dP);
 static float calculateFlowCompensated(float dP);
 static void  drawString(int16_t x, int16_t y, const String &text);
@@ -102,28 +103,6 @@ void setup() {
   ledcWrite(PWM_CAL_CHAN, 0);
   delay(1000);
 
-  // The ADC input range (or gain) can be changed via the following
-  // functions, but be careful never to exceed VDD +0.3V max, or to
-  // exceed the upper and lower limits if you adjust the input range!
-  //                                                                ADS1015  ADS1115
-  //                                                                -------  -------
-  // ads.setGain(GAIN_TWOTHIRDS);  // 2/3x gain +/- 6.144V  1 bit = 3mV      0.1875mV (default)
-  // ads.setGain(GAIN_ONE);        // 1x gain   +/- 4.096V  1 bit = 2mV      0.125mV
-  // ads.setGain(GAIN_TWO);        // 2x gain   +/- 2.048V  1 bit = 1mV      0.0625mV
-  // ads.setGain(GAIN_FOUR);       // 4x gain   +/- 1.024V  1 bit = 0.5mV    0.03125mV
-  // ads.setGain(GAIN_EIGHT);      // 8x gain   +/- 0.512V  1 bit = 0.25mV   0.015625mV
-  // ads.setGain(GAIN_SIXTEEN);    // 16x gain  +/- 0.256V  1 bit = 0.125mV  0.0078125mV
-
-/*
-  if (!ads.begin()) {
-    Serial.println("Failed to initialize ADS.");
-    while (1);
-  }
-
-  // Start the first conversion.
-  ads.startADCReading(ADS1X15_REG_CONFIG_MUX_DIFF_0_1, false); //continuous=false
-*/
-
   analogReadResolution(12);
 
   // Start both busses
@@ -132,21 +111,26 @@ void setup() {
 
   Serial.println("Setup Display");
   initDisplay();
-  delay(1000);
+  delay(500);
   Serial.println("Setup BME280");
   initBME280();
-  delay(1000);
-
+  delay(500);
+  Serial.println("Setup SDP810 Zero");
+  initSDP(sdpZero, I2C_A);
+  delay(500);
+  Serial.println("Setup SDP810 Flow");
+  initSDP(sdpFlow, I2C_B);
+  delay(500);
 
   Serial.println("setup smoothed average.");
-  zeroPressure.begin(SMOOTHED_AVERAGE, 50);
-  flowPressure.begin(SMOOTHED_AVERAGE, 100);
+  zeroPressure.begin(SMOOTHED_AVERAGE, 20);
+  flowPressure.begin(SMOOTHED_AVERAGE, 20);
   adcCalibration.begin(SMOOTHED_AVERAGE, 100);
   pressureAmbient.begin(SMOOTHED_AVERAGE, 40);
   humidityAmbient.begin(SMOOTHED_AVERAGE, 40);
   temperatureAmbient.begin(SMOOTHED_AVERAGE, 40);
-  delay(1000);
-
+  delay(500);
+  /*
   Serial.println("setup LitteFS.");
   if (!LittleFS.begin(true)) {
     Serial.println("An Error has occurred while mounting SPIFFS");
@@ -162,48 +146,83 @@ void setup() {
       Serial.println("starting calibration procedure.");
       calibrateAdc();
     }
-  }
+  }//*/
 
   //
-  Serial.println("Getting setpoint zeropressure control."); 
-  for (size_t i = 0; i < 100; i++) {
-    zeroPressure.add(lookupTable[analogRead(ZERO_PIN)]);
-    delay(2);
+  Serial.println("Getting  offset zeropressure."); 
+  for (size_t i = 0; i < 200; i++) {
+    float differentialPressure;
+    float temperature;
+    uint16_t error = sdpZero.readMeasurement(differentialPressure, temperature);
+    if (error) {
+       Serial.print("Error trying to execute readMeasurement() from zeropresuresensor");
+       break;
+    }
+    zeroPressure.add(differentialPressure);
+    delay(10);
   }
+  delay(500);
   // initialize the variables we're linked to
   Setpoint = Input = offsetZero = zeroPressure.get();
+  Serial.printf("offset zero %.1f\n", offsetZero);
+
+  //
+  Serial.println("Getting offset flowsensor."); 
+  for (size_t i = 0; i < 200; i++) {
+    //flowPressure.add(lookupTable[analogRead(FLOW_PIN)]);
+    //delay(2);
+    float differentialPressure;
+    float temperature;
+    uint16_t error = sdpFlow.readMeasurement(differentialPressure, temperature);
+    if (error) {
+       Serial.print("Error trying to execute readMeasurement() from flowsensor");
+       break;
+    }
+    flowPressure.add(differentialPressure);
+    delay(10);
+  }
+  delay(500);
+  offsetFlow = flowPressure.get();
+  Serial.printf("offset flow %.1f\n", offsetFlow);
 
   // turn the PID on
   Serial.println("turn the PID on.");
   myPID.SetMode(AUTOMATIC);
+  myPID.SetOutputLimits(0, 1023);
+  delay(500);
 
-  //
-  Serial.println("Getting offset flowsensor."); 
-  for (size_t i = 0; i < 100; i++) {
-    flowPressure.add(lookupTable[analogRead(FLOW_PIN)]);
-    delay(2);
-  }
-  offsetFlow = flowPressure.get();
-  Serial.print("Setup done...\n\n");
-  delay(2000);
+  Serial.print("\n Setup done...\n\n");
+  delay(500);
 }
 
 void loop() {
   static uint32_t loopcnt = 0;
   static uint32_t last_millis = 0;
+  float differentialPressure;
+  float temperature;
+  uint16_t error;
 
-  flowPressure.add(lookupTable[analogRead(FLOW_PIN)]);
-  zeroPressure.add(lookupTable[analogRead(ZERO_PIN)]);
+  error = sdpZero.readMeasurement(differentialPressure, temperature);
+  if (error) {
+    Serial.print("Error trying to execute readMeasurement from ZeroPressure");
+  } else {
+    zeroPressure.add(differentialPressure);
+  }
+
+  error = sdpFlow.readMeasurement(differentialPressure, temperature);
+  if (error) {
+    Serial.print("Error trying to execute readMeasurement from FlowPressure");
+  } else {
+    flowPressure.add(differentialPressure);
+  }
 
   if (millis() >= last_millis + 100) {
     last_millis = millis();
-
+    
     Input = zeroPressure.get();
     myPID.Compute();
-    // Convert Output(0..255) to PWM duty cycle (0-1023 for 10-bit resolution)
-    int fanSpeed = Output * 4.0;
     // Apply PWM to fan
-    ledcWrite(PWM_FAN_CHAN, fanSpeed);
+    ledcWrite(PWM_FAN_CHAN, Output);
     
     // every second
     if (loopcnt % 10 == 0) {
@@ -216,8 +235,9 @@ void loop() {
       temperatureAmbient.add(bme280.readTemperature());
       humidityAmbient.add(bme280.readHumidity());
 
-      Serial.printf("Zero presssure: %f (%fV)\n", Input, 3.3 * Input/4096);
-      Serial.printf("PWM fan dutycycle: %.1f%%\n", Output/255.0 * 100.0);
+      Serial.printf("Flow pressure: %.1f Pa\n", flowPressure.get() - offsetFlow);
+      Serial.printf("Zero presssure: %.1f Pa\n", zeroPressure.get() - offsetZero);
+      Serial.printf("PWM fan dutycycle: %.1f%%\n", Output/1023 * 100.0);
     }
     
     // every 2 seconds
@@ -250,6 +270,56 @@ void initBME280(void) {
     snprintf(message, sizeof(message), "SensorID: 0x%02X", bme280.sensorID());
     drawString(5, 10, message);
     delay(5000);
+  }
+}
+//////////////////////////////////////////////////////////////////////////
+
+static void initSDP(SensirionI2CSdp& sdp, TwoWire& wire) {
+  drawString(0, 0, "Setup SDP810 ");                
+  delay(1000);
+  
+  sdp.begin(wire, SDP8XX_I2C_ADDRESS_0);
+
+  uint16_t error;
+  char errorMessage[256];
+
+  uint32_t productNumber;
+  uint8_t serialNumber[8];
+  uint8_t serialNumberSize = 8;
+
+  sdp.stopContinuousMeasurement();
+
+  error = sdp.readProductIdentifier(productNumber, serialNumber,
+    serialNumberSize);
+  if (error) {
+    drawString(0, 12, "Error ");                
+    Serial.print("Error trying to execute readProductIdentifier(): ");
+    errorToString(error, errorMessage, 256);
+    Serial.println(errorMessage);
+    delay(5000);
+  } else {
+    Serial.print("ProductNumber:");
+    Serial.print(productNumber);
+    Serial.print("\t");
+    Serial.print("SerialNumber:");
+    Serial.print("0x");
+    for (size_t i = 0; i < serialNumberSize; i++) {
+            Serial.print(serialNumber[i], HEX);
+     }
+     Serial.println();
+  }
+
+  //error = sdp.startContinuousMeasurementWithDiffPressureTCompAndAveraging();
+  error = sdp.startContinuousMeasurementWithDiffPressureTComp();
+
+  if (error) {
+    Serial.print(
+      "Error trying to execute "
+      "startContinuousMeasurementWithDiffPressureTComp(): "
+    );
+    errorToString(error, errorMessage, 256);
+    Serial.println(errorMessage);
+    delay(500);
   }
 }
 //////////////////////////////////////////////////////////////////////////
