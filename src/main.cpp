@@ -3,6 +3,8 @@
 #include <driver/ledc.h>
 #include <driver/dac.h>
 #include <Wire.h>
+#include "AiEsp32RotaryEncoder.h"
+#include "AiEsp32RotaryEncoderNumberSelector.h"
 #include "SensirionCore.h"
 #include "SensirionI2CSdp.h"
 #include <Adafruit_SH110X.h>
@@ -13,10 +15,21 @@
 #include <Smoothed.h>
 #include <LittleFS.h>
 
+#define ROTARY_ENCODER_A_PIN 2
+#define ROTARY_ENCODER_B_PIN 4
+#define ROTARY_ENCODER_BUTTON_PIN 15
+#define ROTARY_ENCODER_STEPS 4
+
+const float Csupply = 0.90;
+const float Creturn = 1.03;
+const float flowFactor = 260.28;
+const float flowFactorSupply = Csupply * flowFactor;
+const float flowFactorReturn = Creturn * flowFactor;
+
 // Pin definitions
 const int PWM_FAN_PIN = 27;  // 12 = GPIO 32
-const int PWM_CAL_PIN = 13;
-const int CAL_PIN = A0;      // GPIO 36 = A0 = VP
+const int PWM_CAL_PIN = 14;
+const int CAL_PIN = A0;     // GPIO 36 = A0 = VP
 const int ZERO_PIN = A6;    // GPIO 34 = A6
 const int FLOW_PIN = A7;    // GPIO 35 = A7, uses any valid Ax pin as you wish
 
@@ -38,10 +51,19 @@ const int CAL_FREQ = 5000;     // 5 KHz
 const int PWM_RESOLUTION = 10; // 10-bit resolution (0-1023)
 const int CAL_RESOLUTION = 12; // 12-bit resolution (0-4095)
 
+//paramaters for button
+const unsigned long shortPressAfterMiliseconds = 50;   // how long short press shoud be.
+                                                       // Do not set too low to avoid bouncing (false press events).
+const unsigned long longPressAfterMiliseconds = 1000;  // how long long press shoud be.
+
+AiEsp32RotaryEncoder *rotaryEncoder = new AiEsp32RotaryEncoder(ROTARY_ENCODER_A_PIN, ROTARY_ENCODER_B_PIN,
+  ROTARY_ENCODER_BUTTON_PIN, -1, ROTARY_ENCODER_STEPS, false);
+AiEsp32RotaryEncoderNumberSelector numberSelector = AiEsp32RotaryEncoderNumberSelector();
 
 Smoothed<float> zeroPressure;
+Smoothed<float> flow;
 Smoothed<float> flowPressure;
-Smoothed<float> adcCalibration;
+Smoothed<float> calibration;
 Smoothed<float> pressureAmbient;
 Smoothed<float> temperatureAmbient;
 Smoothed<float> humidityAmbient;
@@ -50,8 +72,8 @@ Smoothed<float> humidityAmbient;
 TwoWire I2C_A = TwoWire(0);
 TwoWire I2C_B = TwoWire(1);
 
-SensirionI2CSdp sdpZero;
 SensirionI2CSdp sdpFlow;
+SensirionI2CSdp sdpZero;
 
 // Initialize the OLED display using Wire library
 // ADDRESS, SDA, SCL  -  SDA and SCL usually populate automatically
@@ -61,22 +83,27 @@ SensirionI2CSdp sdpFlow;
 Adafruit_SH1106G display(128, 64, &I2C_A);
 Adafruit_BME280  bme280;     // I2C
 
+hw_timer_t *timer0 = nullptr;
+volatile bool ms10_passed = false;
+bool direction;
+
 // lookup tabel
 int lookupTable[4096];
 int calibrateTable[4096];
 
 // Define Variables we'll be connecting to
-double Setpoint, Input, Output;
+double pidSetpoint, pidInput, pidOutput;
 
 // Specify the links and initial tuning parameters
-double Kp=10, Ki=3, Kd=1;
-PID myPID(&Input, &Output, &Setpoint, Kp, Ki, Kd, REVERSE);
+double Kp=6, Ki=3, Kd=0;
+PID myPID(&pidInput, &pidOutput, &pidSetpoint, Kp, Ki, Kd, REVERSE);
 
-float offsetZero;
-float offsetFlow;
+float offsetZeroPressure;
+float offsetFlowPressure;
 
 static void  initDisplay(void);
 static void  displayMeasurements();
+static void  displayNumberSetpoint();
 static void  initBME280();
 static void  initSDP(SensirionI2CSdp&, TwoWire&);
 static float calculateFlow(float dP);
@@ -85,11 +112,67 @@ static void  drawString(int16_t x, int16_t y, const String &text);
 void         calibrateAdc();
 const char*  readLine(File file);
 int          readFile(const char* filename);
+//////////////////////////////////////////////////////////////////////////
+
+// Interrupt Service Routine (ISR)
+// IRAM_ATTR places the function in RAM for faster execution
+void IRAM_ATTR Timer0_ISR() {
+  ms10_passed = true;
+}
+//////////////////////////////////////////////////////////////////////////
+
+void IRAM_ATTR readEncoder_ISR() {
+    rotaryEncoder->readEncoder_ISR();
+}
+//////////////////////////////////////////////////////////////////////////
+
+void IRAM_ATTR readButton_ISR() {
+    rotaryEncoder->readButton_ISR();
+}
+//////////////////////////////////////////////////////////////////////////
+
+void setupTimer0() {
+  // 1. Initialize timer
+  //timerBegin(timer_number, divider, countUp)
+  // Prescaler 80: 80MHz / 80 = 1MHz (1 microsecond per tick)
+  timer0 = timerBegin(0, 80, true);
+
+  // 2. Attach the ISR function
+  timerAttachInterrupt(timer0, &Timer0_ISR, true);
+
+  // 3. Set alarm to fire every 10000 ticks (10000 us = 10ms)
+  // timerAlarmWrite(timer, microseconds, autoreload)
+  timerAlarmWrite(timer0, 10000, true);
+
+  // 4. Enable the alarm
+  timerAlarmEnable(timer0);
+}
+//////////////////////////////////////////////////////////////////////////
+
+void setupRotaryEncoder() {
+  rotaryEncoder->begin();
+  rotaryEncoder->setup(&readEncoder_ISR, &readButton_ISR);
+  numberSelector.attachEncoder(rotaryEncoder);
+
+  // numberSelector.setRange parameters:
+  float minValue = -10.0;      // set minimum value for example -12.0
+  float maxValue = 10.0;       // set maxinum value for example 12.0
+  float step = 0.1;            // set step increment, default 1, can be smaller steps like 0.5 or 10
+  bool cycleValues = false;    // set true only if you want going to miminum value after maximum 
+  unsigned int decimals = 1;   // set precision - how many decimal places you want, default is 0
+  numberSelector.setRange(minValue, maxValue,  step, cycleValues, decimals);
+
+ numberSelector.setValue(0.0); // sets initial value
+}
+//////////////////////////////////////////////////////////////////////////
 
 void setup() {
   Serial.begin(115200);
 
   Serial.println("\nAirflowmeter is starting up...");
+
+  // setup RotaryEncoder
+  setupRotaryEncoder();
 
   // Configure PWM
   Serial.println("Setup PWM");
@@ -115,38 +198,39 @@ void setup() {
   Serial.println("Setup BME280");
   initBME280();
   delay(500);
-  Serial.println("Setup SDP810 Zero");
-  initSDP(sdpZero, I2C_A);
-  delay(500);
   Serial.println("Setup SDP810 Flow");
-  initSDP(sdpFlow, I2C_B);
+  initSDP(sdpFlow, I2C_A);
+  delay(500);
+  Serial.println("Setup SDP810 Zero");
+  initSDP(sdpZero, I2C_B);
   delay(500);
 
   Serial.println("setup smoothed average.");
-  zeroPressure.begin(SMOOTHED_AVERAGE, 20);
-  flowPressure.begin(SMOOTHED_AVERAGE, 20);
-  adcCalibration.begin(SMOOTHED_AVERAGE, 100);
+  zeroPressure.begin(SMOOTHED_AVERAGE, 10);
+  flow.begin(SMOOTHED_AVERAGE, 50);
+  flowPressure.begin(SMOOTHED_AVERAGE, 100);
+  calibration.begin(SMOOTHED_AVERAGE, 200);
   pressureAmbient.begin(SMOOTHED_AVERAGE, 40);
   humidityAmbient.begin(SMOOTHED_AVERAGE, 40);
   temperatureAmbient.begin(SMOOTHED_AVERAGE, 40);
   delay(500);
-  /*
-  Serial.println("setup LitteFS.");
-  if (!LittleFS.begin(true)) {
-    Serial.println("An Error has occurred while mounting SPIFFS");
-    delay(1000);
-    Serial.println("starting calibration procedure.");
-    calibrateAdc();
-  } else {
-    Serial.printf("LittleFS: totalbytes: %u, usedbytes: %u.\n", LittleFS.totalBytes(), LittleFS.usedBytes());
-    Serial.println("Reading file: /luptable.txt");
-    if (readFile("/luptable.txt") < 0) {
-      Serial.println("Reading file failed");
-      delay(1000);
-      Serial.println("starting calibration procedure.");
-      calibrateAdc();
+
+  //
+  Serial.println("Getting offset flowsensor."); 
+  for (size_t i = 0; i < 200; i++) {
+    float differentialPressure;
+    float temperature;
+    uint16_t error = sdpFlow.readMeasurement(differentialPressure, temperature);
+    if (error) {
+       Serial.print("Error trying to execute readMeasurement() from flowsensor");
+       break;
     }
-  }//*/
+    calibration.add(differentialPressure);
+    delay(10);
+  }
+  delay(500);
+  offsetFlowPressure = calibration.get();
+  Serial.printf("offset flow %.1f\n", offsetFlowPressure);
 
   //
   Serial.println("Getting  offset zeropressure."); 
@@ -158,96 +242,164 @@ void setup() {
        Serial.print("Error trying to execute readMeasurement() from zeropresuresensor");
        break;
     }
-    zeroPressure.add(differentialPressure);
+    calibration.add(differentialPressure);
     delay(10);
   }
   delay(500);
-  // initialize the variables we're linked to
-  Setpoint = Input = offsetZero = zeroPressure.get();
-  Serial.printf("offset zero %.1f\n", offsetZero);
+  offsetZeroPressure = calibration.get();
+  Serial.printf("offset zero %.1f\n", offsetZeroPressure);
 
-  //
-  Serial.println("Getting offset flowsensor."); 
-  for (size_t i = 0; i < 200; i++) {
-    //flowPressure.add(lookupTable[analogRead(FLOW_PIN)]);
-    //delay(2);
-    float differentialPressure;
-    float temperature;
-    uint16_t error = sdpFlow.readMeasurement(differentialPressure, temperature);
-    if (error) {
-       Serial.print("Error trying to execute readMeasurement() from flowsensor");
-       break;
-    }
-    flowPressure.add(differentialPressure);
-    delay(10);
-  }
-  delay(500);
-  offsetFlow = flowPressure.get();
-  Serial.printf("offset flow %.1f\n", offsetFlow);
+  // initialize the PID variables
+  pidSetpoint = 0.0;
+  pidInput = 0.0;
 
   // turn the PID on
   Serial.println("turn the PID on.");
   myPID.SetMode(AUTOMATIC);
   myPID.SetOutputLimits(0, 1023);
+  myPID.SetControllerDirection(direction ? DIRECT : REVERSE);
+  
+  delay(500);
+
+  Serial.print("Setup timer interrupt\n");
+  setupTimer0();
   delay(500);
 
   Serial.print("\n Setup done...\n\n");
   delay(500);
 }
+//////////////////////////////////////////////////////////////////////////
+
+void on_button_short_click() {
+  pidSetpoint = numberSelector.getValue();
+}
+//////////////////////////////////////////////////////////////////////////
+
+void on_button_long_click() {
+  // toggle direction
+  direction = !direction;
+  myPID.SetControllerDirection(direction ? DIRECT : REVERSE);
+}
+//////////////////////////////////////////////////////////////////////////
+
+void handle_rotary_button() {
+  static unsigned long lastTimeButtonDown = 0;
+  static bool wasButtonDown = false;
+
+  bool isEncoderButtonDown = rotaryEncoder->isEncoderButtonDown();
+  
+  if (isEncoderButtonDown) {
+    if (!wasButtonDown) {
+      wasButtonDown = true;
+      // start measuring
+      lastTimeButtonDown = millis();
+    }
+  // button is up
+  } else if (wasButtonDown) {
+    wasButtonDown = false;
+    // click happened, lets see if it was short click, long click or just too short
+    if (millis() - lastTimeButtonDown >= longPressAfterMiliseconds) {
+      on_button_long_click();
+    } else if (millis() - lastTimeButtonDown >= shortPressAfterMiliseconds) {
+      on_button_short_click();
+    }
+  } 
+}
+//////////////////////////////////////////////////////////////////////////
+
+void loopRotaryEncoder() {
+  
+  if (rotaryEncoder->encoderChanged()) {
+    displayNumberSetpoint();
+  } 
+   handle_rotary_button();
+}
+//////////////////////////////////////////////////////////////////////////
+
+void readPressureSensors() {
+  
+  if (ms10_passed == true) {
+    ms10_passed = false;
+    float differentialPressure, temperature;
+
+    // 2ms time to read
+    uint16_t error = sdpZero.readMeasurement(differentialPressure, temperature);
+    if (error) {
+      Serial.print("Error trying to execute readMeasurement from ZeroPressure");
+    } else {
+      zeroPressure.add(differentialPressure - offsetZeroPressure);
+    }
+
+    // 2 ms time to read
+    error = sdpFlow.readMeasurement(differentialPressure, temperature);
+    if (error) {
+      Serial.print("Error trying to execute readMeasurement from FlowPressure");
+    } else {
+      flowPressure.add(differentialPressure - offsetFlowPressure);
+    }
+  }
+}
+//////////////////////////////////////////////////////////////////////////
 
 void loop() {
   static uint32_t loopcnt = 0;
+  static uint32_t loopCount = 0;
   static uint32_t last_millis = 0;
-  float differentialPressure;
-  float temperature;
-  uint16_t error;
+  uint32_t ms = millis();
+  
+  ++loopCount;
+  
+  readPressureSensors();
 
-  error = sdpZero.readMeasurement(differentialPressure, temperature);
-  if (error) {
-    Serial.print("Error trying to execute readMeasurement from ZeroPressure");
-  } else {
-    zeroPressure.add(differentialPressure);
-  }
+  loopRotaryEncoder();
 
-  error = sdpFlow.readMeasurement(differentialPressure, temperature);
-  if (error) {
-    Serial.print("Error trying to execute readMeasurement from FlowPressure");
-  } else {
-    flowPressure.add(differentialPressure);
-  }
+  // every 100ms
+  if (ms >= last_millis + 100) {
+    last_millis = ms;
 
-  if (millis() >= last_millis + 100) {
-    last_millis = millis();
+    flow.add(calculateFlowCompensated(flowPressure.get()));
     
-    Input = zeroPressure.get();
+    pidInput = zeroPressure.get();
+    
     myPID.Compute();
     // Apply PWM to fan
-    ledcWrite(PWM_FAN_CHAN, Output);
+    ledcWrite(PWM_FAN_CHAN, pidOutput);
+
+    readPressureSensors();
     
     // every second
     if (loopcnt % 10 == 0) {
 
       // Only needed in forced mode! In normal mode, you can remove the next line.
       bme280.takeForcedMeasurement(); // has no effect in normal mode
+      readPressureSensors();
 
       // get the measurements from the BME280
       pressureAmbient.add(bme280.readPressure() / 100.0); // convert from Pa to hPa
+      readPressureSensors();
       temperatureAmbient.add(bme280.readTemperature());
+      readPressureSensors();
       humidityAmbient.add(bme280.readHumidity());
+      readPressureSensors();
 
-      Serial.printf("Flow pressure: %.1f Pa\n", flowPressure.get() - offsetFlow);
-      Serial.printf("Zero presssure: %.1f Pa\n", zeroPressure.get() - offsetZero);
-      Serial.printf("PWM fan dutycycle: %.1f%%\n", Output/1023 * 100.0);
+      Serial.printf("delay: %u\n", millis() - ms);
+      Serial.printf("Loop count: %u\n", loopCount); // 168 loops/second
+      Serial.printf("Flow pressure: %.1f Pa\n", flowPressure.get());
+      Serial.printf("Zero presssure: %.1f Pa\n", zeroPressure.get());
+      Serial.printf("PWM fan dutycycle: %.1f%%\n", pidOutput/10.23);
+      loopCount = 0;
+      // 13ms
+      // Serial.printf("Loop duaration: %u\n", millis()- last_millis);
     }
     
     // every 2 seconds
     if (loopcnt++ % 20 == 0) {
-      displayMeasurements();
+      displayMeasurements(); // takes 42ms
+      //Serial.printf("Loop duaration: %u\n", millis() - ms);
     }
-  } else {
-    delay(2);
   }
 }
+//////////////////////////////////////////////////////////////////////////
 
 void initBME280(void) {
   
@@ -366,7 +518,7 @@ static void initDisplay(void) {
   //display.setTextSize(16);
   //display.setTextAlignment(TEXT_ALIGN_LEFT);
   display.clearDisplay();
-  display.setTextColor(SH110X_WHITE);
+  display.setTextColor(SH110X_WHITE, SH110X_BLACK);
   display.setTextSize(1);          // schaalfactor
   //display.drawString(0, 24, "Display ready");
   display.setCursor(0,24);
@@ -409,76 +561,72 @@ static void drawString(int16_t x, int16_t y, const String &text) {
 }
 //////////////////////////////////////////////////////////////////////////
 
+static void displayNumberSetpoint() {
+  // display setpoint zero pressure
+  display.setTextSize(1);
+  display.setCursor(0, 0);
+  display.print("          ");
+  readPressureSensors();
+  display.setCursor(0, 0);
+  display.printf("Sp %.1fPa", numberSelector.getValue());
+  readPressureSensors();
+  display.display();
+  readPressureSensors();
+}
+//////////////////////////////////////////////////////////////////////////
+
 static void displayMeasurements() {
   char message[32];
-  float pz = zeroPressure.get() - offsetZero;
-  float pf = flowPressure.get() - offsetFlow;
-  float flow = calculateFlowCompensated(pf);
-  float temperature = temperatureAmbient.get();
-  float humidity = humidityAmbient.get();
-  float pressure = pressureAmbient.get();
   
   display.clearDisplay();
 
-  // display P_flow and P_zero
-  // snprintf(message, sizeof(message),"Pf %.1f Pa", pf);
-  // display.setFont(ArialMT_Plain_10)
-  // display.setTextAlignment(TEXT_ALIGN_LEFT);
-  // display.drawString(8, 0, message);
-  // display.setFont(&TomThumb);
-  // display.setTextColor(SH110X_WHITE);
-  // display.setFont(&Picopixel);
+  readPressureSensors();
+
+  // display setpoint zero pressure
   display.setTextSize(1);
   display.setCursor(0, 0);
-  display.printf("f %.1fPa", pf);
-  snprintf(message, sizeof(message),"z %.1fPa", pz);
-  // display.setTextAlignment(TEXT_ALIGN_RIGHT);
-  // display.drawString(119, 0, message);
+  display.printf("Sp %.1fPa", pidSetpoint);
+  readPressureSensors();
+
+  // display zero pressure
+  snprintf(message, sizeof(message),"Pz %.1fPa", zeroPressure.get());
   printAlignRight(message, 127,0);
+  readPressureSensors();
   
-  // display Flow
-  snprintf(message, sizeof(message),"%.1f", flow);
-  // display.setTextAlignment(TEXT_ALIGN_CENTER);
+  // display flow
+  snprintf(message, sizeof(message),"%.1f", flow.get());
   display.setFont(); // standaard font
   display.setTextSize(2);
-  // display.drawString(64, 14, message);
   printAlignCenter(message, 63,18);
-  // display.setFont(ArialMT_Plain_10);
+  readPressureSensors();
   display.setTextSize(1);
-  // display.setTextAlignment(TEXT_ALIGN_LEFT);
-  // display.drawString(8, 21, "FLow");
   display.setCursor(8, 21);
   display.print("FLow");
-  // display.setTextAlignment(TEXT_ALIGN_RIGHT);
-  // display.drawString(119,21, "m³/h");
+  readPressureSensors();
   printAlignRight("m3/h", 119, 21);
+  readPressureSensors();
 
   // display temperature
-  // display.setFont(ArialMT_Plain_10);
   display.setTextSize(1);
-  // display.setTextAlignment(TEXT_ALIGN_LEFT);
-  snprintf(message, sizeof(message),"%.1f C", temperature);
-  // display.drawString(8, 41, message);
+  snprintf(message, sizeof(message),"%.1f C", temperatureAmbient.get());
   display.setCursor(8, 41);
   display.print(message);
+  readPressureSensors();
 
   // display humidity
-  // display.setFont(ArialMT_Plain_10);
   display.setTextSize(1);
-  // display.setTextAlignment(TEXT_ALIGN_RIGHT);
-  snprintf(message, sizeof(message),"%.1f %%RH", humidity);
-  // display.drawString(119, 41, message);
+  snprintf(message, sizeof(message),"%.1f %%RH", humidityAmbient.get());
   printAlignRight(message, 119, 41);
+  readPressureSensors();
 
   // display pressure
-  // display.setFont(ArialMT_Plain_10);
   display.setTextSize(1);
-  // display.setTextAlignment(TEXT_ALIGN_CENTER);
-  snprintf(message, sizeof(message),"%.1f hPa", pressure);
-  // display.drawString(64, 54, message);
+  snprintf(message, sizeof(message),"%.1f hPa", pressureAmbient.get());
   printAlignCenter(message, 63, 56);
+  readPressureSensors();
  
   display.display();
+  readPressureSensors();
 }
 //////////////////////////////////////////////////////////////////////////
 
@@ -491,15 +639,16 @@ static void displayMeasurements() {
   *                                  ____________ 
   *                                 /  dP * T  
   * Q = 3600 x 0.0723 = 260.28  \  / ____________  (m³/h)
-  *                             \/      Pabs
+  *                              \/     Pabs
   * 
 */
 
 static float calculateFlowCompensated(float dP) {
   float Pabs = pressureAmbient.get() * 100.0;
   float Tamb = temperatureAmbient.get() + 273.15;
+  float Cflow = direction ? flowFactorSupply : flowFactorReturn;
 
-  return dP > 0.0 ? 260.28 * sqrt(dP * Tamb / Pabs) : 0.0; // (m³/h)
+  return dP > 0.0 ? Cflow * sqrt(dP * Tamb / Pabs) : 0.0; // (m³/h)
 }
 //////////////////////////////////////////////////////////////////////////
 
@@ -545,9 +694,9 @@ void calibrateAdc() {
     delay(10);
     for (size_t j = 0; j < 100; j++) {
       delayMicroseconds(200);
-      adcCalibration.add(analogRead(CAL_PIN));
+      calibration.add(analogRead(CAL_PIN));
     }
-    calibrateTable[i] = adcCalibration.get() + 0.5;
+    calibrateTable[i] = calibration.get() + 0.5;
     Serial.printf("Cal[%u]: %d (%0.3fV)\n", i, calibrateTable[i], 3.3 * calibrateTable[i] / 4096);
     delay(10);
   }
