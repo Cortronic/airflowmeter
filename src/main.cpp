@@ -3,10 +3,10 @@
 #include <driver/ledc.h>
 #include <driver/dac.h>
 #include <Wire.h>
-#include "AiEsp32RotaryEncoder.h"
-#include "AiEsp32RotaryEncoderNumberSelector.h"
-#include "SensirionCore.h"
-#include "SensirionI2CSdp.h"
+#include <AiEsp32RotaryEncoder.h>
+#include <AiEsp32RotaryEncoderNumberSelector.h>
+#include <SensirionCore.h>
+#include <SensirionI2CSdp.h>
 #include <Adafruit_SH110X.h>
 #include <Fonts/Picopixel.h>
 #include <Adafruit_Sensor.h>
@@ -14,6 +14,7 @@
 #include <PID_v1.h>
 #include <Smoothed.h>
 #include <LittleFS.h>
+#include "main.h"
 
 #define ROTARY_ENCODER_A_PIN 2
 #define ROTARY_ENCODER_B_PIN 4
@@ -23,8 +24,6 @@
 const float Csupply = 0.90;
 const float Creturn = 1.03;
 const float flowFactor = 260.28;
-const float flowFactorSupply = Csupply * flowFactor;
-const float flowFactorReturn = Creturn * flowFactor;
 
 // Pin definitions
 const int PWM_FAN_PIN = 27;  // 12 = GPIO 32
@@ -85,7 +84,11 @@ Adafruit_BME280  bme280;     // I2C
 
 hw_timer_t *timer0 = nullptr;
 volatile bool ms10_passed = false;
-bool direction;
+
+ModeType modeType = MEASURE_MODE;
+HoodValveType hoodValveType = HOOD_A_RETURN_VALVE;
+
+bool direction = false; // false for return
 
 // lookup tabel
 int lookupTable[4096];
@@ -100,9 +103,18 @@ PID myPID(&pidInput, &pidOutput, &pidSetpoint, Kp, Ki, Kd, REVERSE);
 
 float offsetZeroPressure;
 float offsetFlowPressure;
+float compensationFactorRA = 0.0;
+float compensationFactorRB = 0.0;
+float compensationFactorSA = 0.0;
+float compensationFactorSB = 0.0;
+
+float flowFactorSupply = Csupply * flowFactor;
+float flowFactorReturn = Creturn * flowFactor;
 
 static void  initDisplay(void);
 static void  displayMeasurements();
+static void  displaySelectMode(ModeType);
+static void  displaySelectHoodMode(HoodValveType);
 static void  displayNumberSetpoint();
 static void  initBME280();
 static void  initSDP(SensirionI2CSdp&, TwoWire&);
@@ -155,14 +167,32 @@ void setupRotaryEncoder() {
   numberSelector.attachEncoder(rotaryEncoder);
 
   // numberSelector.setRange parameters:
-  float minValue = -10.0;      // set minimum value for example -12.0
-  float maxValue = 10.0;       // set maxinum value for example 12.0
+  float minValue = -20.0;      // set minimum value for example -12.0
+  float maxValue = 20.0;       // set maxinum value for example 12.0
   float step = 0.1;            // set step increment, default 1, can be smaller steps like 0.5 or 10
   bool cycleValues = false;    // set true only if you want going to miminum value after maximum 
   unsigned int decimals = 1;   // set precision - how many decimal places you want, default is 0
   numberSelector.setRange(minValue, maxValue,  step, cycleValues, decimals);
+  numberSelector.setValue(0.0); // sets initial value
+}
+//////////////////////////////////////////////////////////////////////////
 
- numberSelector.setValue(0.0); // sets initial value
+void setHoodValveType(HoodValveType type) {
+  hoodValveType = type;
+  
+  switch(type) {
+    case HOOD_A_RETURN_VALVE:
+    case HOOD_B_RETURN_VALVE:
+      direction = false;
+      break;
+    
+    case HOOD_A_SUPPLY_VALVE:  
+    case HOOD_B_SUPPLY_VALVE:
+      direction = true;
+      break;
+  }
+  myPID.SetControllerDirection(direction ? REVERSE : DIRECT);
+
 }
 //////////////////////////////////////////////////////////////////////////
 
@@ -257,7 +287,7 @@ void setup() {
   Serial.println("turn the PID on.");
   myPID.SetMode(AUTOMATIC);
   myPID.SetOutputLimits(0, 1023);
-  myPID.SetControllerDirection(direction ? DIRECT : REVERSE);
+  myPID.SetControllerDirection(direction ? REVERSE : DIRECT);
   
   delay(500);
 
@@ -270,15 +300,117 @@ void setup() {
 }
 //////////////////////////////////////////////////////////////////////////
 
+float calculateCompensation(float flow) {
+  
+  switch (hoodValveType) {
+    case HOOD_A_RETURN_VALVE:
+      return compensationFactorRA * flow;
+    case HOOD_B_RETURN_VALVE:
+      return compensationFactorRB * flow;
+    case HOOD_A_SUPPLY_VALVE:
+      return compensationFactorSA * flow;
+    case HOOD_B_SUPPLY_VALVE:
+      return compensationFactorSB * flow; 
+      break; 
+  }
+  return 0.0;
+}
+//////////////////////////////////////////////////////////////////////////
+
+void initNextMode(ModeType type) {
+
+  switch (type) {
+    case SELECT_MODE:
+      modeType = type;
+      break;
+
+    case SELECT_HOOD:
+      modeType = type;
+      numberSelector.setRange(0, 3,  1, true, 0);
+      numberSelector.setValue(HOOD_A_RETURN_VALVE);
+      displaySelectHoodMode(HOOD_A_RETURN_VALVE);
+      break;
+
+    case MEASURE_MODE:
+      modeType = type;
+      break; 
+
+    case CALIBRATE_ZERO_COMPENSATION_MODE:
+      modeType = type;
+      numberSelector.setRange(-15.0, 15.0, 0.1, false, 1);
+      numberSelector.setValue(0.0);
+      pidSetpoint = 0.0;
+      displayMeasurements();
+      displayNumberSetpoint();
+      break;
+
+    case CALIBRATE_FLOW_MODE:
+      modeType = type;
+      numberSelector.setRange(0.5, 1.5, 0.001, false, 3);
+      numberSelector.setValue(1.0);
+     break;
+  }
+
+}
+//////////////////////////////////////////////////////////////////////////
+
 void on_button_short_click() {
-  pidSetpoint = numberSelector.getValue();
+  // pidSetpoint = compensationFactorB = numberSelector.getValue();
+  // compensationFactorA = flow.get();
+  switch (modeType) {
+    case SELECT_MODE:
+      initNextMode((ModeType)(uint8_t)numberSelector.getValue()); 
+      break;
+
+    case SELECT_HOOD:
+      modeType = MEASURE_MODE;
+      setHoodValveType((HoodValveType)(uint8_t)numberSelector.getValue());
+      displayMeasurements();
+      break;
+
+    case MEASURE_MODE:
+      break;
+
+    case CALIBRATE_ZERO_COMPENSATION_MODE:
+      modeType = MEASURE_MODE;
+      switch (hoodValveType) {
+        case HOOD_A_RETURN_VALVE:
+          compensationFactorRA = numberSelector.getValue() / flowPressure.get();
+          break;
+        case HOOD_B_RETURN_VALVE: 
+          compensationFactorRB = numberSelector.getValue() / flowPressure.get();
+          break;
+        case HOOD_A_SUPPLY_VALVE:
+          compensationFactorSA = numberSelector.getValue() / flowPressure.get();
+          break;
+        case HOOD_B_SUPPLY_VALVE:
+          compensationFactorSB = numberSelector.getValue() / flowPressure.get();
+          break;
+      }
+      break;
+
+    case CALIBRATE_FLOW_MODE:
+      modeType = MEASURE_MODE;
+      break;
+  }
 }
 //////////////////////////////////////////////////////////////////////////
 
 void on_button_long_click() {
   // toggle direction
-  direction = !direction;
-  myPID.SetControllerDirection(direction ? DIRECT : REVERSE);
+  // direction = !direction;
+  // myPID.SetControllerDirection(direction ?  REVERSE : DIRECT);
+  
+  switch(modeType) {
+    case MEASURE_MODE:
+      modeType = SELECT_MODE;
+      numberSelector.setRange(1, 4,  1, true, 0);
+      numberSelector.setValue(1); // sets initial value
+      displaySelectMode(SELECT_HOOD);
+      break;
+    default:
+      break;
+  }
 }
 //////////////////////////////////////////////////////////////////////////
 
@@ -310,9 +442,38 @@ void handle_rotary_button() {
 void loopRotaryEncoder() {
   
   if (rotaryEncoder->encoderChanged()) {
-    displayNumberSetpoint();
+    switch (modeType) {
+      
+      case SELECT_MODE:
+        displaySelectMode((ModeType)(uint8_t)numberSelector.getValue()); 
+        break;
+      
+      case SELECT_HOOD:
+        displaySelectHoodMode((HoodValveType)(uint8_t)numberSelector.getValue());
+        break;
+      
+      case MEASURE_MODE:
+        break;
+      
+      case CALIBRATE_ZERO_COMPENSATION_MODE:
+        pidSetpoint = numberSelector.getValue();
+        break;
+
+      case CALIBRATE_FLOW_MODE:
+        switch (hoodValveType) {
+          case HOOD_A_RETURN_VALVE:
+          case HOOD_B_RETURN_VALVE: 
+            flowFactorReturn = flowFactor * numberSelector.getValue();
+            break;
+          case HOOD_A_SUPPLY_VALVE:
+          case HOOD_B_SUPPLY_VALVE:
+            flowFactorSupply = flowFactor * numberSelector.getValue();
+            break;
+        }
+        break;
+    }
   } 
-   handle_rotary_button();
+  handle_rotary_button();
 }
 //////////////////////////////////////////////////////////////////////////
 
@@ -394,7 +555,14 @@ void loop() {
     
     // every 2 seconds
     if (loopcnt++ % 20 == 0) {
-      displayMeasurements(); // takes 42ms
+      if (modeType == MEASURE_MODE 
+          || modeType == CALIBRATE_ZERO_COMPENSATION_MODE
+          || modeType == CALIBRATE_FLOW_MODE) {
+        displayMeasurements(); // takes 42ms
+        if (modeType == MEASURE_MODE ||modeType == CALIBRATE_FLOW_MODE) {
+          pidSetpoint = calculateCompensation(flow.get());
+        }
+      }
       //Serial.printf("Loop duaration: %u\n", millis() - ms);
     }
   }
@@ -575,6 +743,22 @@ static void displayNumberSetpoint() {
 }
 //////////////////////////////////////////////////////////////////////////
 
+static const char* getHoodValveText() {
+
+  switch (hoodValveType) {
+    case HOOD_A_RETURN_VALVE:
+      return "RETURN_A";
+    case HOOD_A_SUPPLY_VALVE:
+      return "SUPPLY_A";
+    case HOOD_B_RETURN_VALVE:
+      return "RETURN_B";
+    case HOOD_B_SUPPLY_VALVE:
+      return "SUPPLY_B";
+  }
+  return "        ";
+}
+//////////////////////////////////////////////////////////////////////////
+
 static void displayMeasurements() {
   char message[32];
   
@@ -585,48 +769,107 @@ static void displayMeasurements() {
   // display setpoint zero pressure
   display.setTextSize(1);
   display.setCursor(0, 0);
-  display.printf("Sp %.1fPa", pidSetpoint);
+  display.printf("Sp %.1f Pa", pidSetpoint);
   readPressureSensors();
 
-  // display zero pressure
-  snprintf(message, sizeof(message),"Pz %.1fPa", zeroPressure.get());
-  printAlignRight(message, 127,0);
+  // display current hood valve type
+  printAlignRight(getHoodValveText(), 127, 0);
   readPressureSensors();
-  
+
   // display flow
   snprintf(message, sizeof(message),"%.1f", flow.get());
   display.setFont(); // standaard font
   display.setTextSize(2);
-  printAlignCenter(message, 63,18);
+  printAlignCenter(message, 63, 18);
   readPressureSensors();
   display.setTextSize(1);
-  display.setCursor(8, 21);
-  display.print("FLow");
+  display.setCursor(0, 21);
+  display.print("Flow");
   readPressureSensors();
-  printAlignRight("m3/h", 119, 21);
+  printAlignRight("m3/h", 127, 21);
+  readPressureSensors();
+
+  // display zero pressure
+  display.setCursor(0, 41);
+  display.printf("Pz %.1f Pa", zeroPressure.get());
   readPressureSensors();
 
   // display temperature
-  display.setTextSize(1);
   snprintf(message, sizeof(message),"%.1f C", temperatureAmbient.get());
-  display.setCursor(8, 41);
-  display.print(message);
+  printAlignRight(message, 127, 41);
+  readPressureSensors();
+
+  // display absolute pressure
+  display.setCursor(0, 57);
+  display.printf("Pa %.1f hPa", pressureAmbient.get());
   readPressureSensors();
 
   // display humidity
-  display.setTextSize(1);
   snprintf(message, sizeof(message),"%.1f %%RH", humidityAmbient.get());
-  printAlignRight(message, 119, 41);
+  printAlignRight(message, 127, 57);
   readPressureSensors();
 
-  // display pressure
-  display.setTextSize(1);
-  snprintf(message, sizeof(message),"%.1f hPa", pressureAmbient.get());
-  printAlignCenter(message, 63, 56);
-  readPressureSensors();
- 
   display.display();
   readPressureSensors();
+}
+//////////////////////////////////////////////////////////////////////////
+
+static void displaySelectMode(ModeType type) {
+  
+  display.clearDisplay();
+  display.setTextSize(1);
+
+  if (type == SELECT_HOOD) display.setTextColor(SH110X_BLACK, SH110X_WHITE);
+  display.setCursor(0, 0);
+  display.print("Select Hood");
+  if (type == SELECT_HOOD) display.setTextColor(SH110X_WHITE, SH110X_BLACK);
+
+  if (type == MEASURE_MODE)  display.setTextColor(SH110X_BLACK, SH110X_WHITE);
+  display.setCursor(0, 8);
+  display.print("Measure Mode");
+  if (type == MEASURE_MODE) display.setTextColor(SH110X_WHITE, SH110X_BLACK);
+
+  if (type == CALIBRATE_ZERO_COMPENSATION_MODE) display.setTextColor(SH110X_BLACK, SH110X_WHITE);
+  display.setCursor(0, 16);
+  display.print("Calibrate Pcomp");
+  if (type == CALIBRATE_ZERO_COMPENSATION_MODE) display.setTextColor(SH110X_WHITE, SH110X_BLACK);
+  
+  if (type == CALIBRATE_FLOW_MODE) display.setTextColor(SH110X_BLACK, SH110X_WHITE);
+  display.setCursor(0, 24);
+  display.print("Calibrate Flow");
+  if (type == CALIBRATE_FLOW_MODE) display.setTextColor(SH110X_WHITE, SH110X_BLACK);
+
+  display.display();
+
+}
+//////////////////////////////////////////////////////////////////////////
+
+static void  displaySelectHoodMode(HoodValveType type) {
+  display.clearDisplay();
+  display.setTextSize(1);
+
+  if (type == HOOD_A_RETURN_VALVE) display.setTextColor(SH110X_BLACK, SH110X_WHITE);
+  display.setCursor(0, 0);
+  display.print("Return Hood A");
+  if (type == HOOD_A_RETURN_VALVE) display.setTextColor(SH110X_WHITE, SH110X_BLACK);
+
+  if (type == HOOD_A_SUPPLY_VALVE)  display.setTextColor(SH110X_BLACK, SH110X_WHITE);
+  display.setCursor(0, 8);
+  display.print("Supply Hood A");
+  if (type == HOOD_A_SUPPLY_VALVE) display.setTextColor(SH110X_WHITE, SH110X_BLACK);
+
+  if (type == HOOD_B_RETURN_VALVE) display.setTextColor(SH110X_BLACK, SH110X_WHITE);
+  display.setCursor(0, 16);
+  display.print("Return Hood B");
+  if (type == HOOD_B_RETURN_VALVE) display.setTextColor(SH110X_WHITE, SH110X_BLACK);
+  
+  if (type == HOOD_B_SUPPLY_VALVE) display.setTextColor(SH110X_BLACK, SH110X_WHITE);
+  display.setCursor(0, 24);
+  display.print("Supply Hood B");
+  if (type == HOOD_B_SUPPLY_VALVE) display.setTextColor(SH110X_WHITE, SH110X_BLACK);
+
+  display.display();
+
 }
 //////////////////////////////////////////////////////////////////////////
 
@@ -643,12 +886,27 @@ static void displayMeasurements() {
   * 
 */
 
-static float calculateFlowCompensated(float dP) {
-  float Pabs = pressureAmbient.get() * 100.0;
-  float Tamb = temperatureAmbient.get() + 273.15;
-  float Cflow = direction ? flowFactorSupply : flowFactorReturn;
+static float getHoodValveCoefficient() {
 
-  return dP > 0.0 ? Cflow * sqrt(dP * Tamb / Pabs) : 0.0; // (m³/h)
+  switch (hoodValveType) {
+    case HOOD_A_RETURN_VALVE:
+    case HOOD_B_RETURN_VALVE:
+      return flowFactorReturn;
+    case HOOD_A_SUPPLY_VALVE:
+    case HOOD_B_SUPPLY_VALVE:
+      return flowFactorSupply;
+  }
+  return 0.0;
+}
+//////////////////////////////////////////////////////////////////////////
+
+static float calculateFlowCompensated(float dP) {
+  float Pa = pressureAmbient.get() * 100.0;
+  float Ta = temperatureAmbient.get() + 273.15;
+  //float C = direction ? flowFactorSupply : flowFactorReturn;
+  float C = getHoodValveCoefficient();
+
+  return dP > 0.0 ? C * sqrt(dP * Ta / Pa) : 0.0; // (m³/h)
 }
 //////////////////////////////////////////////////////////////////////////
 
