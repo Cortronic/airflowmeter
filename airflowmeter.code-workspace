@@ -1,15 +1,8 @@
 {
 	"folders": [
 		{
-			"name": "fancontroller",
-			"path": "../fancontroller"
-		},
-		{
 			"name": "airflowmeter",
 			"path": "."
-		},
-		{
-			"path": "../ledstrip"
 		}
 	],
 	"settings": {}
