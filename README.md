@@ -1,4 +1,4 @@
 # Venturi Flow Meter
 
-![image](airflowmeter.jpg)
+![image](airflowmeter.jpeg)
 
