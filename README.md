@@ -79,7 +79,7 @@ De testbank is opgebouwd uit modulaire 125mm secties:
 
 ## 4. Rekenmethodiek & Compensatie
 
-De nauwkeurigheid van dit systeem komt voort uit real-time compensatie van de luchtdichtheid (). We gebruiken de **Magnus-Tetens benadering** voor de invloed van luchtvochtigheid.
+De nauwkeurigheid van dit systeem komt voort uit real-time compensatie van de luchtdichtheid ($$\rho$$). We gebruiken de **Magnus-Tetens benadering** voor de invloed van luchtvochtigheid.
 
 ### Luchtdichtheid ($$\rho$$)
 
@@ -95,6 +95,7 @@ Het debiet door de Venturi wordt berekend via:
 $$Q = 3600 \cdot C_d \cdot A_{throat} \cdot \sqrt{\frac{2 \cdot \Delta P}{\rho \cdot (1 - \beta^4)}}$$
 
 Waarin Beta ($$\beta$$) gelijk is aan:
+
 $$\beta = \frac{D_{throat}}{D_{inlet}}$$
  
 ---
