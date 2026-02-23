@@ -15,8 +15,6 @@ The Flow Meter (DUT): Uses an active compensation fan to eliminate its own flow 
 
 The Test Rig (Reference): A modular 125mm wind tunnel featuring a calibrated Venturi section for reference measurements.
 
-Absoluut. Dit project is technisch zeer solide en verdient een `README.md` die dat reflecteert. Hieronder heb ik alle informatie — van de ESP32-architectuur tot de complexe vloeistofdynamica — samengevoegd tot een professioneel document voor je GitHub-repository.
-
 ---
 
 # Nuldruk-gecompenseerde Luchtdebietmeter & Testbank
@@ -87,10 +85,14 @@ De nauwkeurigheid van dit systeem komt voort uit real-time compensatie van de lu
 
 De dichtheid wordt berekend door de partiële drukken van droge lucht en waterdamp op te tellen:
 
+$$\rho = \frac{p_{dry}}{R_d \cdot T} + \frac{p_{vapor}}{R_v \cdot T}$$
+
 
 ### Volumestroom ()
 
 Het debiet door de Venturi wordt berekend via:
+
+$$Q = 3600 \cdot C_d \cdot A_{throat} \cdot \sqrt{\frac{2 \cdot \Delta P}{\rho \cdot (1 - \beta^4)}}$$
 
 
 ---
