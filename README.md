@@ -94,7 +94,9 @@ Het debiet door de Venturi wordt berekend via:
 
 $$Q = 3600 \cdot C_d \cdot A_{throat} \cdot \sqrt{\frac{2 \cdot \Delta P}{\rho \cdot (1 - \beta^4)}}$$
 
-
+Waarin Beta ($$\beta$$) gelijk is aan:
+$$\beta = \frac{D_{throat}}{D_{inlet}}$$
+ 
 ---
 
 ## 5. Installatie & Gebruik
