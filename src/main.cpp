@@ -950,7 +950,7 @@ static void displayMeasurements() {
 
   // display absolute pressure
   display.setCursor(0, 57);
-  display.printf("Pa %.1f hPa", pressureAmbient.get());
+  display.printf("%.1f hPa", pressureAmbient.get());
   readPressureSensors();
 
   // display humidity
@@ -976,7 +976,7 @@ static void displaySelectMode(ModeType mtype) {
   if (mtype == MT_MEASURE)  display.setTextColor(SH110X_BLACK, SH110X_WHITE);
   display.setCursor(0, 10);
   display.print("Measure Mode");
-  if (math_errhandling == MT_MEASURE) display.setTextColor(SH110X_WHITE, SH110X_BLACK);
+  if (mtype == MT_MEASURE) display.setTextColor(SH110X_WHITE, SH110X_BLACK);
 
   if (mtype == MT_CALIBRATE_ZERO_COMPENSATION) display.setTextColor(SH110X_BLACK, SH110X_WHITE);
   display.setCursor(0, 19);
