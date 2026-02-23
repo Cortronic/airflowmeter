@@ -102,7 +102,7 @@ double pidSetpoint, pidInput, pidOutput;
 
 // Specify the links and initial tuning parameters
 double Kp=6, Ki=3, Kd=0;
-PID myPID(&pidInput, &pidOutput, &pidSetpoint, Kp, Ki, Kd, REVERSE);
+PID pid(&pidInput, &pidOutput, &pidSetpoint, Kp, Ki, Kd, REVERSE);
 
 float offsetZeroPressure;
 float offsetFlowPressure;
@@ -116,6 +116,7 @@ float flowFactorSupply = Csupply * flowFactor;
 float flowFactorReturn = Creturn * flowFactor;
 
 static void  initDisplay(void);
+static void  displayTextNumber(const char *txt, float);
 static void  displayMeasurements();
 static void  displaySelectMode(ModeType);
 static void  displaySelectHoodMode(HoodValveType);
@@ -196,7 +197,7 @@ void setHoodValveType(HoodValveType type) {
       direction = true;
       break;
   }
-  myPID.SetControllerDirection(direction ? REVERSE : DIRECT);
+  pid.SetControllerDirection(direction ? REVERSE : DIRECT);
 
 }
 //////////////////////////////////////////////////////////////////////////
@@ -317,14 +318,18 @@ void setup() {
   Serial.printf("offset zero %.1f\n", offsetZeroPressure);
 
   // initialize the PID variables
+  Kp = getFloat("Kp", Kp);
+  Ki = getFloat("Ki", Ki );
+  Kd = getFloat("Kd", Kd);
   pidSetpoint = 0.0;
   pidInput = 0.0;
 
   // turn the PID on
   Serial.println("turn the PID on.");
-  myPID.SetMode(AUTOMATIC);
-  myPID.SetOutputLimits(0, 1023);
-  myPID.SetControllerDirection(direction ? REVERSE : DIRECT);
+  pid.SetTunings(Kp, Ki, Kd);
+  pid.SetMode(AUTOMATIC);
+  pid.SetOutputLimits(0, 1023);
+  pid.SetControllerDirection(direction ? REVERSE : DIRECT);
   
   delay(500);
 
@@ -359,30 +364,31 @@ float calculateCompensationPressure() {
 
 void initNextMode(ModeType type) {
 
+   modeType = type;
+
   switch (type) {
     case MT_SELECT:
-      modeType = type;
+      numberSelector.setRange(1, 7,  1, true, 0);
+      numberSelector.setValue(MT_SELECT_HOOD);
+      displaySelectMode(MT_SELECT_HOOD);
       break;
 
     case MT_SELECT_HOOD:
-      modeType = type;
       numberSelector.setRange(0, 3,  1, true, 0);
       numberSelector.setValue(HOOD_A_RETURN_VALVE);
       displaySelectHoodMode(HOOD_A_RETURN_VALVE);
       break;
 
     case MT_MEASURE:
-      modeType = type;
       break; 
 
-    case MT_CALIBRATE_ZERO_COMPENSATION:      modeType = type;
+    case MT_CALIBRATE_ZERO_COMPENSATION:
       numberSelector.setRange(-15.0, 15.0, 0.1, false, 1);
       numberSelector.setValue(pidSetpoint);
       displayMeasurements();
       break;
 
     case MT_CALIBRATE_FLOW:
-      modeType = type;
       numberSelector.setRange(0.8, 1.2, 0.001, false, 3);
       switch (hoodValveType) {
         case HOOD_A_RETURN_VALVE:
@@ -395,8 +401,22 @@ void initNextMode(ModeType type) {
           break;
       }
      break;
-  }
 
+     case MT_PID_TUNE_P:
+      numberSelector.setRange(0.0, 10.0, 0.01, false, 2);
+      numberSelector.setValue(Kp);
+      break;
+
+    case MT_PID_TUNE_I:
+      numberSelector.setRange(0.0, 10.0, 0.01, false, 2);
+      numberSelector.setValue(Ki);
+      break;
+
+    case MT_PID_TUNE_D:
+      numberSelector.setRange(0.0, 10.0, 0.01, false, 2);
+      numberSelector.setValue(Kd);
+      break;
+  }
 }
 //////////////////////////////////////////////////////////////////////////
 
@@ -452,6 +472,21 @@ void on_button_short_click() {
           break;
       }
       break;
+    
+    case MT_PID_TUNE_P:
+      saveFloat("Kp", numberSelector.getValue());
+      initNextMode(MT_MEASURE);
+      break;
+
+    case MT_PID_TUNE_I:
+      saveFloat("Ki", numberSelector.getValue());
+      initNextMode(MT_MEASURE);
+      break;
+      
+    case MT_PID_TUNE_D:
+      saveFloat("Kd", numberSelector.getValue());
+      initNextMode(MT_MEASURE);
+      break;
   }
 }
 //////////////////////////////////////////////////////////////////////////
@@ -463,10 +498,7 @@ void on_button_long_click() {
   
   switch(modeType) {
     case MT_MEASURE:
-      modeType = MT_SELECT;
-      numberSelector.setRange(1, 4,  1, true, 0);
-      numberSelector.setValue(1); // sets initial value
-      displaySelectMode(MT_SELECT_HOOD);
+      initNextMode(MT_SELECT);
       break;
     default:
       break;
@@ -533,6 +565,24 @@ void loopRotaryEncoder() {
         }
         displayCoefficientFlow();
         break;
+
+        case MT_PID_TUNE_P:
+        Kp = numberSelector.getValue();
+        pid.SetTunings(Kp, Ki, Kd);
+        displayTextNumber("Kp: %.2f", Kp);
+        break;
+
+      case MT_PID_TUNE_I:
+        Ki = numberSelector.getValue();
+        pid.SetTunings(Kp, Ki, Kd);
+        displayTextNumber("Ki: %.2f", Ki);
+        break;
+      
+      case MT_PID_TUNE_D:
+        Kd = numberSelector.getValue();
+        pid.SetTunings(Kp, Ki, Kd);
+        displayTextNumber("Kd: %.2f", Kd);
+        break;
     }
   } 
   handle_rotary_button();
@@ -584,7 +634,7 @@ void loop() {
     
     pidInput = zeroPressure.get();
     
-    myPID.Compute();
+    pid.Compute();
     // Apply PWM to fan
     ledcWrite(PWM_FAN_CHAN, pidOutput);
 
@@ -829,6 +879,20 @@ static const char* getHoodValveText() {
 }
 //////////////////////////////////////////////////////////////////////////
 
+static void displayTextNumber(const char *txt, float number) {
+  // display setpoint zero pressure
+  display.setTextSize(1);
+  display.setCursor(0, 0);
+  display.print("          ");
+  readPressureSensors();
+  display.setCursor(0, 0);
+  display.printf(txt, number);
+  readPressureSensors();
+  display.display();
+  readPressureSensors();
+}
+//////////////////////////////////////////////////////////////////////////
+
 static void displayMeasurements() {
   char message[32];
   
@@ -838,8 +902,18 @@ static void displayMeasurements() {
 
   display.setTextSize(1);
   display.setCursor(0, 0);
+
   if (modeType == MT_CALIBRATE_FLOW) {
     display.printf("Cd: %.3f", numberSelector.getValue());
+  } else if (modeType == MT_PID_TUNE_P) {
+    // display proportional gain PID controller
+    display.printf("Kp: %.2f", numberSelector.getValue());
+  } else if (modeType == MT_PID_TUNE_I) {
+    // display integral gain PID controller
+    display.printf("Ki: %.2f", numberSelector.getValue());
+  } else if (modeType == MT_PID_TUNE_D) {
+    // display derivative gain PID controller
+    display.printf("Kd: %.2f", numberSelector.getValue());     
   } else {
     // display setpoint zero pressure
     display.printf("Sp %.1f Pa", pidSetpoint);
@@ -888,30 +962,45 @@ static void displayMeasurements() {
 }
 //////////////////////////////////////////////////////////////////////////
 
-static void displaySelectMode(ModeType type) {
+static void displaySelectMode(ModeType mtype) {
   
   display.clearDisplay();
   display.setTextSize(1);
 
-  if (type == MT_SELECT_HOOD) display.setTextColor(SH110X_BLACK, SH110X_WHITE);
-  display.setCursor(0, 0);
+  if (mtype == MT_SELECT_HOOD) display.setTextColor(SH110X_BLACK, SH110X_WHITE);
+  display.setCursor(0, 1);
   display.print("Select Hood");
-  if (type == MT_SELECT_HOOD) display.setTextColor(SH110X_WHITE, SH110X_BLACK);
+  if (mtype == MT_SELECT_HOOD) display.setTextColor(SH110X_WHITE, SH110X_BLACK);
 
-  if (type == MT_MEASURE)  display.setTextColor(SH110X_BLACK, SH110X_WHITE);
-  display.setCursor(0, 8);
+  if (mtype == MT_MEASURE)  display.setTextColor(SH110X_BLACK, SH110X_WHITE);
+  display.setCursor(0, 10);
   display.print("Measure Mode");
-  if (type == MT_MEASURE) display.setTextColor(SH110X_WHITE, SH110X_BLACK);
+  if (math_errhandling == MT_MEASURE) display.setTextColor(SH110X_WHITE, SH110X_BLACK);
 
-  if (type == MT_CALIBRATE_ZERO_COMPENSATION) display.setTextColor(SH110X_BLACK, SH110X_WHITE);
-  display.setCursor(0, 16);
+  if (mtype == MT_CALIBRATE_ZERO_COMPENSATION) display.setTextColor(SH110X_BLACK, SH110X_WHITE);
+  display.setCursor(0, 19);
   display.print("Calibrate Pcomp");
-  if (type == MT_CALIBRATE_ZERO_COMPENSATION) display.setTextColor(SH110X_WHITE, SH110X_BLACK);
+  if (mtype == MT_CALIBRATE_ZERO_COMPENSATION) display.setTextColor(SH110X_WHITE, SH110X_BLACK);
   
-  if (type == MT_CALIBRATE_FLOW) display.setTextColor(SH110X_BLACK, SH110X_WHITE);
-  display.setCursor(0, 24);
+  if (mtype == MT_CALIBRATE_FLOW) display.setTextColor(SH110X_BLACK, SH110X_WHITE);
+  display.setCursor(0, 28);
   display.print("Calibrate Flow");
-  if (type == MT_CALIBRATE_FLOW) display.setTextColor(SH110X_WHITE, SH110X_BLACK);
+  if (mtype == MT_CALIBRATE_FLOW) display.setTextColor(SH110X_WHITE, SH110X_BLACK);
+
+  if (mtype == MT_PID_TUNE_P) display.setTextColor(SH110X_BLACK, SH110X_WHITE);
+  display.setCursor(0, 37);
+  display.print("Tune Kp");
+  if (mtype == MT_PID_TUNE_P) display.setTextColor(SH110X_WHITE, SH110X_BLACK);
+
+  if (mtype == MT_PID_TUNE_I) display.setTextColor(SH110X_BLACK, SH110X_WHITE);
+  display.setCursor(0, 46);
+   display.print("Tune Ki");
+  if (mtype == MT_PID_TUNE_I) display.setTextColor(SH110X_WHITE, SH110X_BLACK);
+  
+  if (mtype == MT_PID_TUNE_D) display.setTextColor(SH110X_BLACK, SH110X_WHITE);
+  display.setCursor(0, 55);
+   display.print("Tune Kd");
+  if (mtype == MT_PID_TUNE_D) display.setTextColor(SH110X_WHITE, SH110X_BLACK);
 
   display.display();
 
