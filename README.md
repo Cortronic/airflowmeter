@@ -135,5 +135,3 @@ void setup() {
 Dit project is gelicenseerd onder de **MIT-licentie**. Voel u vrij om het te verbeteren en te delen!
 
 ---
-
-**Zal ik ook een korte 'Troubleshooting' sectie toevoegen, bijvoorbeeld over hoe om te gaan met 'noise' op de I2C-lijnen bij langere kabels?**
