@@ -81,14 +81,14 @@ De testbank is opgebouwd uit modulaire 125mm secties:
 
 De nauwkeurigheid van dit systeem komt voort uit real-time compensatie van de luchtdichtheid (). We gebruiken de **Magnus-Tetens benadering** voor de invloed van luchtvochtigheid.
 
-### Luchtdichtheid ()
+### Luchtdichtheid (&&\rho$$)
 
 De dichtheid wordt berekend door de partiële drukken van droge lucht en waterdamp op te tellen:
 
 $$\rho = \frac{p_{dry}}{R_d \cdot T} + \frac{p_{vapor}}{R_v \cdot T}$$
 
 
-### Volumestroom ()
+### Volumestroom ($$$Q$)
 
 Het debiet door de Venturi wordt berekend via:
 
@@ -126,7 +126,7 @@ void setup() {
 
 1. **Luchtdichtheid:** Controleer of de BME280 de juiste omgevingswaarden geeft.
 2. **Nul-meting:** Kalibreer de SDP800 sensoren bij stilstaande lucht.
-3. **K-factor:** Gebruik de testbank om de *Discharge Coefficient* () van uw specifieke 3D-print te bepalen (startwaarde: 0.975).
+3. **K-factor:** Gebruik de testbank om de *Discharge Coefficient* ($$C_d$$) van uw specifieke 3D-print te bepalen (startwaarde: 0.975).
 
 ---
 
