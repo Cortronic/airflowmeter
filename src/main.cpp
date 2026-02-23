@@ -9,7 +9,6 @@
 #include <SensirionCore.h>
 #include <SensirionI2CSdp.h>
 #include <Adafruit_SH110X.h>
-#include <Fonts/Picopixel.h>
 #include <Adafruit_Sensor.h>
 #include <Adafruit_BME280.h>
 #include <PID_v1.h>
