@@ -669,7 +669,11 @@ void loop() {
     if (loopcnt++ % 20 == 0) {
       if (modeType == MT_MEASURE 
           || modeType == MT_CALIBRATE_ZERO_COMPENSATION
-          || modeType == MT_CALIBRATE_FLOW) {
+          || modeType == MT_CALIBRATE_FLOW
+          || modeType == MT_PID_TUNE_P
+          || modeType == MT_PID_TUNE_I
+          || modeType == MT_PID_TUNE_D
+        ) {
         displayMeasurements(); // takes 42ms
         if (modeType == MT_MEASURE || modeType == MT_CALIBRATE_FLOW) {
           pidSetpoint = calculateCompensationPressure();
