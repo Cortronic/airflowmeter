@@ -1,5 +1,7 @@
 # Venturi Flow Meter
 
-![image](airflowmeter.png){width=200 height=300}
+<p align="left">
+  <img src="airflowmeter.png" width="200" height= "300">
+</p>
 
 
