@@ -81,14 +81,14 @@ De testbank is opgebouwd uit modulaire 125mm secties:
 
 De nauwkeurigheid van dit systeem komt voort uit real-time compensatie van de luchtdichtheid (). We gebruiken de **Magnus-Tetens benadering** voor de invloed van luchtvochtigheid.
 
-### Luchtdichtheid (&&\rho$$)
+### Luchtdichtheid ($$\rho$$)
 
 De dichtheid wordt berekend door de partiële drukken van droge lucht en waterdamp op te tellen:
 
 $$\rho = \frac{p_{dry}}{R_d \cdot T} + \frac{p_{vapor}}{R_v \cdot T}$$
 
 
-### Volumestroom ($$$Q$)
+### Volumestroom ($$Q$$)
 
 Het debiet door de Venturi wordt berekend via:
 
