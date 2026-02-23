@@ -88,7 +88,7 @@ Adafruit_BME280  bme280;     // I2C
 hw_timer_t *timer0 = nullptr;
 volatile bool ms10_passed = false;
 
-ModeType modeType = MEASURE_MODE;
+ModeType modeType = MT_MEASURE;
 HoodValveType hoodValveType = HOOD_A_RETURN_VALVE;
 
 bool direction = false; // false for return
@@ -360,29 +360,28 @@ float calculateCompensationPressure() {
 void initNextMode(ModeType type) {
 
   switch (type) {
-    case SELECT_MODE:
+    case MT_SELECT:
       modeType = type;
       break;
 
-    case SELECT_HOOD:
+    case MT_SELECT_HOOD:
       modeType = type;
       numberSelector.setRange(0, 3,  1, true, 0);
       numberSelector.setValue(HOOD_A_RETURN_VALVE);
       displaySelectHoodMode(HOOD_A_RETURN_VALVE);
       break;
 
-    case MEASURE_MODE:
+    case MT_MEASURE:
       modeType = type;
       break; 
 
-    case CALIBRATE_ZERO_COMPENSATION_MODE:
-      modeType = type;
+    case MT_CALIBRATE_ZERO_COMPENSATION:      modeType = type;
       numberSelector.setRange(-15.0, 15.0, 0.1, false, 1);
       numberSelector.setValue(pidSetpoint);
       displayMeasurements();
       break;
 
-    case CALIBRATE_FLOW_MODE:
+    case MT_CALIBRATE_FLOW:
       modeType = type;
       numberSelector.setRange(0.8, 1.2, 0.001, false, 3);
       switch (hoodValveType) {
@@ -405,21 +404,21 @@ void on_button_short_click() {
   // pidSetpoint = compensationFactorB = numberSelector.getValue();
   // compensationFactorA = flow.get();
   switch (modeType) {
-    case SELECT_MODE:
+    case MT_SELECT:
       initNextMode((ModeType)(uint8_t)numberSelector.getValue()); 
       break;
 
-    case SELECT_HOOD:
-      modeType = MEASURE_MODE;
+    case MT_SELECT_HOOD:
+      modeType = MT_MEASURE;
       setHoodValveType((HoodValveType)(uint8_t)numberSelector.getValue());
       displayMeasurements();
       break;
 
-    case MEASURE_MODE:
+    case MT_MEASURE:
       break;
 
-    case CALIBRATE_ZERO_COMPENSATION_MODE:
-      modeType = MEASURE_MODE;
+    case MT_CALIBRATE_ZERO_COMPENSATION:
+      modeType = MT_MEASURE;
       switch (hoodValveType) {
         case HOOD_A_RETURN_VALVE:
           compensationFactorRA = numberSelector.getValue() / flowPressure.get();
@@ -440,8 +439,8 @@ void on_button_short_click() {
       }
       break;
 
-    case CALIBRATE_FLOW_MODE:
-      modeType = MEASURE_MODE;
+    case MT_CALIBRATE_FLOW:
+      modeType = MT_MEASURE;
       switch (hoodValveType) {
         case HOOD_A_RETURN_VALVE:
         case HOOD_B_RETURN_VALVE:
@@ -463,11 +462,11 @@ void on_button_long_click() {
   // myPID.SetControllerDirection(direction ?  REVERSE : DIRECT);
   
   switch(modeType) {
-    case MEASURE_MODE:
-      modeType = SELECT_MODE;
+    case MT_MEASURE:
+      modeType = MT_SELECT;
       numberSelector.setRange(1, 4,  1, true, 0);
       numberSelector.setValue(1); // sets initial value
-      displaySelectMode(SELECT_HOOD);
+      displaySelectMode(MT_SELECT_HOOD);
       break;
     default:
       break;
@@ -505,23 +504,23 @@ void loopRotaryEncoder() {
   if (rotaryEncoder->encoderChanged()) {
     switch (modeType) {
       
-      case SELECT_MODE:
+      case MT_SELECT:
         displaySelectMode((ModeType)(uint8_t)numberSelector.getValue()); 
         break;
       
-      case SELECT_HOOD:
+      case MT_SELECT_HOOD:
         displaySelectHoodMode((HoodValveType)(uint8_t)numberSelector.getValue());
         break;
       
-      case MEASURE_MODE:
+      case MT_MEASURE:
         break;
       
-      case CALIBRATE_ZERO_COMPENSATION_MODE:
+      case MT_CALIBRATE_ZERO_COMPENSATION:
         pidSetpoint = numberSelector.getValue();
         displaySetpointZeroCompensation();
         break;
 
-      case CALIBRATE_FLOW_MODE:
+      case MT_CALIBRATE_FLOW:
         switch (hoodValveType) {
           case HOOD_A_RETURN_VALVE:
           case HOOD_B_RETURN_VALVE: 
@@ -618,11 +617,11 @@ void loop() {
     
     // every 2 seconds
     if (loopcnt++ % 20 == 0) {
-      if (modeType == MEASURE_MODE 
-          || modeType == CALIBRATE_ZERO_COMPENSATION_MODE
-          || modeType == CALIBRATE_FLOW_MODE) {
+      if (modeType == MT_MEASURE 
+          || modeType == MT_CALIBRATE_ZERO_COMPENSATION
+          || modeType == MT_CALIBRATE_FLOW) {
         displayMeasurements(); // takes 42ms
-        if (modeType == MEASURE_MODE || modeType == CALIBRATE_FLOW_MODE) {
+        if (modeType == MT_MEASURE || modeType == MT_CALIBRATE_FLOW) {
           pidSetpoint = calculateCompensationPressure();
         }
       }
@@ -839,7 +838,7 @@ static void displayMeasurements() {
 
   display.setTextSize(1);
   display.setCursor(0, 0);
-  if (modeType == CALIBRATE_FLOW_MODE) {
+  if (modeType == MT_CALIBRATE_FLOW) {
     display.printf("Cd: %.3f", numberSelector.getValue());
   } else {
     // display setpoint zero pressure
@@ -894,25 +893,25 @@ static void displaySelectMode(ModeType type) {
   display.clearDisplay();
   display.setTextSize(1);
 
-  if (type == SELECT_HOOD) display.setTextColor(SH110X_BLACK, SH110X_WHITE);
+  if (type == MT_SELECT_HOOD) display.setTextColor(SH110X_BLACK, SH110X_WHITE);
   display.setCursor(0, 0);
   display.print("Select Hood");
-  if (type == SELECT_HOOD) display.setTextColor(SH110X_WHITE, SH110X_BLACK);
+  if (type == MT_SELECT_HOOD) display.setTextColor(SH110X_WHITE, SH110X_BLACK);
 
-  if (type == MEASURE_MODE)  display.setTextColor(SH110X_BLACK, SH110X_WHITE);
+  if (type == MT_MEASURE)  display.setTextColor(SH110X_BLACK, SH110X_WHITE);
   display.setCursor(0, 8);
   display.print("Measure Mode");
-  if (type == MEASURE_MODE) display.setTextColor(SH110X_WHITE, SH110X_BLACK);
+  if (type == MT_MEASURE) display.setTextColor(SH110X_WHITE, SH110X_BLACK);
 
-  if (type == CALIBRATE_ZERO_COMPENSATION_MODE) display.setTextColor(SH110X_BLACK, SH110X_WHITE);
+  if (type == MT_CALIBRATE_ZERO_COMPENSATION) display.setTextColor(SH110X_BLACK, SH110X_WHITE);
   display.setCursor(0, 16);
   display.print("Calibrate Pcomp");
-  if (type == CALIBRATE_ZERO_COMPENSATION_MODE) display.setTextColor(SH110X_WHITE, SH110X_BLACK);
+  if (type == MT_CALIBRATE_ZERO_COMPENSATION) display.setTextColor(SH110X_WHITE, SH110X_BLACK);
   
-  if (type == CALIBRATE_FLOW_MODE) display.setTextColor(SH110X_BLACK, SH110X_WHITE);
+  if (type == MT_CALIBRATE_FLOW) display.setTextColor(SH110X_BLACK, SH110X_WHITE);
   display.setCursor(0, 24);
   display.print("Calibrate Flow");
-  if (type == CALIBRATE_FLOW_MODE) display.setTextColor(SH110X_WHITE, SH110X_BLACK);
+  if (type == MT_CALIBRATE_FLOW) display.setTextColor(SH110X_WHITE, SH110X_BLACK);
 
   display.display();
 
