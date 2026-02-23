@@ -17,4 +17,4 @@ typedef enum {
   HOOD_B_RETURN_VALVE = 2,
   HOOD_B_SUPPLY_VALVE = 3,
 } HoodValveType;
-extern HoodValveType hoodValveType;+
+extern HoodValveType hoodValveType;
