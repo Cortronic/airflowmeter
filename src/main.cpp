@@ -14,7 +14,6 @@
 #include <Adafruit_BME280.h>
 #include <PID_v1.h>
 #include <Smoothed.h>
-#include <LittleFS.h>
 #include "main.h"
 
 #define ROTARY_ENCODER_A_PIN 2
