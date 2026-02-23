@@ -15,11 +15,6 @@
 #include <Smoothed.h>
 #include "main.h"
 
-#define ROTARY_ENCODER_A_PIN 2
-#define ROTARY_ENCODER_B_PIN 4
-#define ROTARY_ENCODER_BUTTON_PIN 15
-#define ROTARY_ENCODER_STEPS 4
-
 const float Csupply = 0.90;
 const float Creturn = 1.03;
 const float flowFactor = 260.28;
@@ -31,10 +26,17 @@ const int CAL_PIN = A0;     // GPIO 36 = A0 = VP
 const int ZERO_PIN = A6;    // GPIO 34 = A6
 const int FLOW_PIN = A7;    // GPIO 35 = A7, uses any valid Ax pin as you wish
 
+// 12C pins
 const int I2C_SDA0_PIN = 21;
 const int I2C_SCL0_PIN = 22;
 const int I2C_SDA1_PIN = 25;
 const int I2C_SCL1_PIN = 26;
+
+// Rotary encoder
+const int ROTARY_ENCODER_A_PIN = 2; // 18;
+const int ROTARY_ENCODER_B_PIN = 4; //19;
+const int ROTARY_ENCODER_BUTTON_PIN = 15; //5;
+const int ROTARY_ENCODER_STEPS = 4;
 
 // Display
 const int I2C_ADDRESS_DISPLAY = 0x3C;
