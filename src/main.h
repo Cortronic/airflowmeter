@@ -18,3 +18,7 @@ typedef enum {
   HOOD_B_SUPPLY_VALVE = 3,
 } HoodValveType;
 extern HoodValveType hoodValveType;
+
+#define ZERO_COMP_MIN -25.0
+#define ZERO_COMP_MAX 25.0
+#define ZERO_COMP_STEP 0.1

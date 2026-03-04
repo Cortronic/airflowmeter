@@ -380,7 +380,7 @@ void initNextMode(ModeType type) {
       break; 
 
     case MT_CALIBRATE_ZERO_COMPENSATION:
-      numberSelector.setRange(-15.0, 15.0, 0.1, false, 1);
+      numberSelector.setRange(ZERO_COMP_MIN, ZERO_COMP_MAX, ZERO_COMP_STEP, false, 1);
       numberSelector.setValue(pidSetpoint);
       displayMeasurements();
       break;
@@ -980,12 +980,12 @@ static void displaySelectMode(ModeType mtype) {
 
   if (mtype == MT_CALIBRATE_ZERO_COMPENSATION) display.setTextColor(SH110X_BLACK, SH110X_WHITE);
   display.setCursor(0, 19);
-  display.print("Calibrate Pcomp");
+  display.print("Tune Zero Comp");
   if (mtype == MT_CALIBRATE_ZERO_COMPENSATION) display.setTextColor(SH110X_WHITE, SH110X_BLACK);
   
   if (mtype == MT_CALIBRATE_FLOW) display.setTextColor(SH110X_BLACK, SH110X_WHITE);
   display.setCursor(0, 28);
-  display.print("Calibrate Flow");
+  display.print("Tune Flow");
   if (mtype == MT_CALIBRATE_FLOW) display.setTextColor(SH110X_WHITE, SH110X_BLACK);
 
   if (mtype == MT_PID_TUNE_P) display.setTextColor(SH110X_BLACK, SH110X_WHITE);
