@@ -403,6 +403,7 @@ void initNextMode(ModeType type) {
      break;
 
      case MT_TUNE_PID:
+      pidTuneType = PID_TUNE_NONE;
       numberSelector.setRange(0, 3, 1, true, 0);
       numberSelector.setValue(PID_TUNE_NONE);
       displaySelectTunePID(PID_TUNE_NONE);
@@ -475,19 +476,19 @@ void on_button_short_click() {
               pidTuneType = PID_TUNE_P;
               numberSelector.setRange(0, 20, 0.1, false, 1);
               numberSelector.setValue(Kp);
-              displaySelectTunePID(PID_TUNE_P);
+              displayMeasurements();
               break;
             case PID_TUNE_I:
               pidTuneType = PID_TUNE_I;
               numberSelector.setRange(0, 10, 0.1, false, 1);
               numberSelector.setValue(Ki);
-              displaySelectTunePID(PID_TUNE_I);
+              displayMeasurements();
               break;
             case PID_TUNE_D:
               pidTuneType = PID_TUNE_D;
               numberSelector.setRange(0, 10, 0.1, false, 1);
               numberSelector.setValue(Kd);
-              displaySelectTunePID(PID_TUNE_D);
+              displayMeasurements();
               break;
           }
           break;
@@ -591,6 +592,7 @@ void loopRotaryEncoder() {
         switch (pidTuneType) {
 
           case PID_TUNE_NONE:
+            displaySelectTunePID((PidTuneType)(uint8_t)numberSelector.getValue());
             break;
 
           case PID_TUNE_P:
