@@ -5,9 +5,7 @@ typedef enum {
   MT_MEASURE = 2,
   MT_CALIBRATE_ZERO_COMPENSATION = 3,
   MT_CALIBRATE_FLOW = 4,
-  MT_PID_TUNE_P = 5,
-  MT_PID_TUNE_I = 6,
-  MT_PID_TUNE_D = 7,
+  MT_TUNE_PID = 5,
 } ModeType;
 extern ModeType modeType;
 
@@ -18,6 +16,14 @@ typedef enum {
   HOOD_B_SUPPLY_VALVE = 3,
 } HoodValveType;
 extern HoodValveType hoodValveType;
+
+typedef enum {
+  PID_TUNE_NONE = 0,
+  PID_TUNE_P = 1,
+  PID_TUNE_I = 2,
+  PID_TUNE_D = 3,
+} PidTuneType;
+extern PidTuneType pidTuneType;
 
 #define ZERO_COMP_MIN -25.0
 #define ZERO_COMP_MAX 25.0

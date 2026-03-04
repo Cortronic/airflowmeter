@@ -90,6 +90,7 @@ volatile bool ms10_passed = false;
 
 ModeType modeType = MT_MEASURE;
 HoodValveType hoodValveType = HOOD_A_RETURN_VALVE;
+PidTuneType pidTuneType = PID_TUNE_NONE;
 
 bool direction = false; // false for return
 
@@ -119,6 +120,7 @@ static void  initDisplay(void);
 static void  displayTextNumber(const char *txt, float);
 static void  displayMeasurements();
 static void  displaySelectMode(ModeType);
+static void displaySelectTunePID(PidTuneType type);
 static void  displaySelectHoodMode(HoodValveType);
 static void  displayCoefficientFlow();
 static void  displaySetpointZeroCompensation();
@@ -365,7 +367,8 @@ void initNextMode(ModeType type) {
 
   switch (type) {
     case MT_SELECT:
-      numberSelector.setRange(1, 7,  1, true, 0);
+      numberSelector.setRange(1, 5
+        ,  1, true, 0);
       numberSelector.setValue(MT_SELECT_HOOD);
       displaySelectMode(MT_SELECT_HOOD);
       break;
@@ -399,19 +402,10 @@ void initNextMode(ModeType type) {
       }
      break;
 
-     case MT_PID_TUNE_P:
-      numberSelector.setRange(0.0, 10.0, 0.01, false, 2);
-      numberSelector.setValue(Kp);
-      break;
-
-    case MT_PID_TUNE_I:
-      numberSelector.setRange(0.0, 10.0, 0.01, false, 2);
-      numberSelector.setValue(Ki);
-      break;
-
-    case MT_PID_TUNE_D:
-      numberSelector.setRange(0.0, 10.0, 0.01, false, 2);
-      numberSelector.setValue(Kd);
+     case MT_TUNE_PID:
+      numberSelector.setRange(0, 3, 1, true, 0);
+      numberSelector.setValue(PID_TUNE_NONE);
+      displaySelectTunePID(PID_TUNE_NONE);
       break;
   }
 }
@@ -469,21 +463,51 @@ void on_button_short_click() {
           break;
       }
       break;
-    
-    case MT_PID_TUNE_P:
-      saveFloat("Kp", numberSelector.getValue());
-      initNextMode(MT_MEASURE);
-      break;
 
-    case MT_PID_TUNE_I:
-      saveFloat("Ki", numberSelector.getValue());
-      initNextMode(MT_MEASURE);
-      break;
-      
-    case MT_PID_TUNE_D:
-      saveFloat("Kd", numberSelector.getValue());
-      initNextMode(MT_MEASURE);
-      break;
+    case MT_TUNE_PID:
+      switch (pidTuneType) {
+        case PID_TUNE_NONE:
+          switch((PidTuneType)(uint8_t)numberSelector.getValue()) {
+            case PID_TUNE_NONE:
+              initNextMode(MT_SELECT);
+              break;
+            case PID_TUNE_P:
+              pidTuneType = PID_TUNE_P;
+              numberSelector.setRange(0, 20, 0.1, false, 1);
+              numberSelector.setValue(Kp);
+              displaySelectTunePID(PID_TUNE_P);
+              break;
+            case PID_TUNE_I:
+              pidTuneType = PID_TUNE_I;
+              numberSelector.setRange(0, 10, 0.1, false, 1);
+              numberSelector.setValue(Ki);
+              displaySelectTunePID(PID_TUNE_I);
+              break;
+            case PID_TUNE_D:
+              pidTuneType = PID_TUNE_D;
+              numberSelector.setRange(0, 10, 0.1, false, 1);
+              numberSelector.setValue(Kd);
+              displaySelectTunePID(PID_TUNE_D);
+              break;
+          }
+          break;
+
+        case PID_TUNE_P:
+          saveFloat("Kp", numberSelector.getValue());
+          initNextMode(MT_TUNE_PID);
+          break;
+
+        case PID_TUNE_I:
+          saveFloat("Ki", numberSelector.getValue());
+          initNextMode(MT_TUNE_PID);
+          break;
+          
+        case PID_TUNE_D:
+          saveFloat("Kd", numberSelector.getValue());
+          initNextMode(MT_TUNE_PID);
+          break; 
+      }
+      break;           
   }
 }
 //////////////////////////////////////////////////////////////////////////
@@ -563,23 +587,30 @@ void loopRotaryEncoder() {
         displayCoefficientFlow();
         break;
 
-        case MT_PID_TUNE_P:
-        Kp = numberSelector.getValue();
-        pid.SetTunings(Kp, Ki, Kd);
-        displayTextNumber("Kp: %.2f", Kp);
-        break;
+      case MT_TUNE_PID:
+        switch (pidTuneType) {
 
-      case MT_PID_TUNE_I:
-        Ki = numberSelector.getValue();
-        pid.SetTunings(Kp, Ki, Kd);
-        displayTextNumber("Ki: %.2f", Ki);
-        break;
-      
-      case MT_PID_TUNE_D:
-        Kd = numberSelector.getValue();
-        pid.SetTunings(Kp, Ki, Kd);
-        displayTextNumber("Kd: %.2f", Kd);
-        break;
+          case PID_TUNE_NONE:
+            break;
+
+          case PID_TUNE_P:
+            Kp = numberSelector.getValue();
+            pid.SetTunings(Kp, Ki, Kd);
+            displayTextNumber("Kp: %.2f", Kp);
+            break;
+
+          case PID_TUNE_I:
+            Ki = numberSelector.getValue();
+            pid.SetTunings(Kp, Ki, Kd);
+            displayTextNumber("Ki: %.2f", Ki);
+            break;
+          
+          case PID_TUNE_D:
+            Kd = numberSelector.getValue();
+            pid.SetTunings(Kp, Ki, Kd);
+            displayTextNumber("Kd: %.2f", Kd);
+            break;
+        }    
     }
   } 
   handle_rotary_button();
@@ -667,9 +698,9 @@ void loop() {
       if (modeType == MT_MEASURE 
           || modeType == MT_CALIBRATE_ZERO_COMPENSATION
           || modeType == MT_CALIBRATE_FLOW
-          || modeType == MT_PID_TUNE_P
-          || modeType == MT_PID_TUNE_I
-          || modeType == MT_PID_TUNE_D
+          || pidTuneType == PID_TUNE_P
+          || pidTuneType == PID_TUNE_I
+          || pidTuneType == PID_TUNE_D
         ) {
         displayMeasurements(); // takes 42ms
         if (modeType == MT_MEASURE || modeType == MT_CALIBRATE_FLOW) {
@@ -906,13 +937,13 @@ static void displayMeasurements() {
 
   if (modeType == MT_CALIBRATE_FLOW) {
     display.printf("Cd: %.3f", numberSelector.getValue());
-  } else if (modeType == MT_PID_TUNE_P) {
+  } else if (pidTuneType ==PID_TUNE_P) {
     // display proportional gain PID controller
     display.printf("Kp: %.2f", numberSelector.getValue());
-  } else if (modeType == MT_PID_TUNE_I) {
+  } else if (pidTuneType == PID_TUNE_I) {
     // display integral gain PID controller
     display.printf("Ki: %.2f", numberSelector.getValue());
-  } else if (modeType == MT_PID_TUNE_D) {
+  } else if (pidTuneType == PID_TUNE_D) {
     // display derivative gain PID controller
     display.printf("Kd: %.2f", numberSelector.getValue());     
   } else {
@@ -988,23 +1019,41 @@ static void displaySelectMode(ModeType mtype) {
   display.print("Tune Flow");
   if (mtype == MT_CALIBRATE_FLOW) display.setTextColor(SH110X_WHITE, SH110X_BLACK);
 
-  if (mtype == MT_PID_TUNE_P) display.setTextColor(SH110X_BLACK, SH110X_WHITE);
+  if (mtype == MT_TUNE_PID) display.setTextColor(SH110X_BLACK, SH110X_WHITE);
   display.setCursor(0, 37);
-  display.print("Tune Kp");
-  if (mtype == MT_PID_TUNE_P) display.setTextColor(SH110X_WHITE, SH110X_BLACK);
-
-  if (mtype == MT_PID_TUNE_I) display.setTextColor(SH110X_BLACK, SH110X_WHITE);
-  display.setCursor(0, 46);
-   display.print("Tune Ki");
-  if (mtype == MT_PID_TUNE_I) display.setTextColor(SH110X_WHITE, SH110X_BLACK);
-  
-  if (mtype == MT_PID_TUNE_D) display.setTextColor(SH110X_BLACK, SH110X_WHITE);
-  display.setCursor(0, 55);
-   display.print("Tune Kd");
-  if (mtype == MT_PID_TUNE_D) display.setTextColor(SH110X_WHITE, SH110X_BLACK);
+  display.print("Tune PID");
+  if (mtype == MT_TUNE_PID) display.setTextColor(SH110X_WHITE, SH110X_BLACK);
 
   display.display();
 
+}
+//////////////////////////////////////////////////////////////////////////
+
+static void displaySelectTunePID(PidTuneType type) {
+  display.clearDisplay();
+  display.setTextSize(1);
+
+  if (type == PID_TUNE_NONE) display.setTextColor(SH110X_BLACK, SH110X_WHITE);
+  display.setCursor(0, 1);
+  display.print("Back");
+  if (type == PID_TUNE_NONE) display.setTextColor(SH110X_WHITE, SH110X_BLACK);
+
+  if (type == PID_TUNE_P) display.setTextColor(SH110X_BLACK, SH110X_WHITE);
+  display.setCursor(0, 10);
+  display.print("Tune Kp");
+  if (type == PID_TUNE_P) display.setTextColor(SH110X_WHITE, SH110X_BLACK);
+
+  if (type == PID_TUNE_I)  display.setTextColor(SH110X_BLACK, SH110X_WHITE);
+  display.setCursor(0, 19);
+  display.print("Tune Ki");
+  if (type == PID_TUNE_I) display.setTextColor(SH110X_WHITE, SH110X_BLACK);
+
+  if (type == PID_TUNE_D) display.setTextColor(SH110X_BLACK, SH110X_WHITE);
+  display.setCursor(0, 28);
+  display.print("Tune Kd");
+  if (type == PID_TUNE_D) display.setTextColor(SH110X_WHITE, SH110X_BLACK);
+  
+  display.display();
 }
 //////////////////////////////////////////////////////////////////////////
 
