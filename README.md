@@ -1,140 +1,105 @@
-# 3D-printed Venturi Flow Meter
+# Zero-Pressure Compensated Airflow Meter
 
 <p align="left">
   <img src="airflowmeter.png" width="200" height= "300">
 </p>
 
+An open-source, high-precision instrument designed for measuring air flow in residential ventilation systems (HRV/MVHR). By using active zero-pressure compensation, this device eliminates its own pneumatic resistance, providing "invisible" measurements that do not disturb the ventilation system's balance.
 
-# Zero-Pressure Compensated Airflow Meter & Calibration Rig
-This project provides an open-source, high-precision solution for measuring air flow in ventilation systems (such as HRV/MVHR units). For approximately €100, you can build an instrument that rivals the accuracy of professional meters costing thousands of euros.
+## 1. Core Principle
 
-# 1. Project Overview
-The system consists of two configurations running on the same ESP32 architecture:
-
-The Flow Meter (DUT): Uses an active compensation fan to eliminate its own flow resistance (zero-pressure measurement).
-
-The Test Rig (Reference): A modular 125mm wind tunnel featuring a calibrated Venturi section for reference measurements.
+Traditional flow hoods create backpressure, leading to underestimated flow readings. This device uses a secondary **SDP800-500PA** differential pressure sensor to monitor the pressure inside the hood. An integrated **Arctic S8038-10K fan** is controlled via a PID loop to maintain exactly $0.0\text{ Pa}$ relative to the room.
 
 ---
 
-# Nuldruk-gecompenseerde Luchtdebietmeter & Testbank
+## 2. Hardware Architecture
 
-Dit project biedt een open-source, high-precision oplossing voor het meten van luchtdebiet in ventilatiesystemen (zoals WTW-units). Voor circa **€100,-** bouwt u een instrument dat qua nauwkeurigheid concurreert met professionele meters van duizenden euro's.
+The **ESP32-WROOM** utilizes two independent I2C buses to ensure high-speed data acquisition without bus collisions between identical sensors.
 
-## 1. Project Overzicht
+### Pinout Configuration
 
-Het systeem bestaat uit twee delen die op dezelfde ESP32-basis draaien:
-
-* **De Debietmeter:** Gebruikt een actieve compensatie-ventilator om de eigen weerstand te elimineren (nuldruk-meting).
-* **De Testbank:** Een modulaire 125mm windtunnel met een gekalibreerde Venturi-sectie voor referentiemetingen.
-
----
-
-## 2. Hardware Architectuur (ESP32-WROOM)
-
-De schakeling gebruikt twee gescheiden I2C-bussen om adres-conflicten tussen de identieke SDP800 sensoren te voorkomen.
-
-### Pinbezetting (Pinout)
-
-| Component | Functie | ESP32 GPIO | Opmerking |
+| Component | Function | ESP32 GPIO | Notes |
 | --- | --- | --- | --- |
-| **I2C Bus 0** | SDA / SCL | **21 / 22** | BME280, OLED, SDP800 #1 (Referentie) |
-| **I2C Bus 1** | SDA / SCL | **25 / 26** | SDP800 #2 (Nuldruk sensor) |
-| **Encoder** | CLK / DT / SW | **2, 4, 15** | Bediening menu en kalibratie |
-| **PWM Fan** | Control | **27** | 25kHz PWM signaal naar Arctic Fan |
-
-```mermaid
-graph LR
-    subgraph Controller
-    ESP[ESP32-WROOM]
-    end
-    subgraph Bus_0
-    ESP --- BME[BME280]
-    ESP --- OLED[OLED]
-    ESP --- SDP1[SDP800 #1]
-    end
-    subgraph Bus_1
-    ESP --- SDP2[SDP800 #2]
-    end
-    subgraph Output
-    ESP ---|PWM| Fan[Arctic Fan]
-    end
-
-```
+| **I2C Bus 0** | Data / Clock | **21 / 22** | BME280, OLED, SDP800 (Venturi) |
+| **I2C Bus 1** | Data / Clock | **25 / 26** | SDP800 (Zero-Pressure Sensor) |
+| **Encoder** | CLK / DT / SW | **2, 4, 15** | Menu & Calibration |
+| **PWM Fan** | Speed Control | **27** | 25kHz PWM signal |
 
 ---
 
-## 3. Mechanische Opbouw (3D-Print)
+## 3. User Interface & Menu Structure
 
-### De Testbank (Referentie)
+The 1.3" OLED (SH1106) provides a high-density data overview using a context-aware interface.
 
-De testbank is opgebouwd uit modulaire 125mm secties:
+### Navigation Logic
 
-1. **Inlaat:** 500x500mm paneel met Ø125mm ventiel-interface.
-2. **Conditionering:** Dubbele honingraat-gelijkrichters voor een laminair flowprofiel.
-3. **Meetkern:** Venturi-buis (, ).
-4. **Aandrijving:** Arctic S12038-8K server-ventilator (12V).
+* **Short Press:** Opens the **Quick-Profile Menu** to switch between calibrated profiles (Axial/Radial - Supply/Extract).
+* **Long Press (>2s):** Enters the **System Menu** (Back, Tune Zero-Comp, Tune Flow, Tune PID).
+
+### Display Layout (Measurement Mode)
+
+The screen is optimized for the SH110X library using `textsize 1` and `textsize 2`.
+
+| Position | Content | Example |
+| --- | --- | --- |
+| **Top Left** | Active Setpoint | `Set: 1.25 Pa` |
+| **Top Right** | Profile Name | `RAD-SUPPLY` |
+| **Center** | **Flow Rate** | **125.4 m3/h** |
+| **Row 3** | Hood P / Temp | `P: 0.1 Pa` / `21.2 C` |
+| **Bottom** | Baro / Hum | `1014 hPa` / `42 %` |
 
 ---
 
-## 4. Rekenmethodiek & Compensatie
+## 4. Interactive Calibration (Live-Trim)
 
-De nauwkeurigheid van dit systeem komt voort uit real-time compensatie van de luchtdichtheid ($$\rho$$). We gebruiken de **Magnus-Tetens benadering** voor de invloed van luchtvochtigheid.
+The device uses a "Live-Trim" methodology. Settings are automatically saved to the active profile in the **NVS Flash** memory (`Preferences.h`).
 
-### Luchtdichtheid ($$\rho$$)
+* **Tune Zero-Comp:** Adjust the setpoint (range -25 to +25 Pa) while connected to the test bench to compensate for air impingement (common in radial valves).
+* **Tune Flow:** Rotate the encoder to align the meter's flow reading with the reference Test Bench.
+* **Tune PID:** Select P, I, or D using **inverse video highlighting**. Adjust parameters in real-time and observe fan stability immediately.
 
-De dichtheid wordt berekend door de partiële drukken van droge lucht en waterdamp op te tellen:
+---
+
+## 5. Scientific Calculations
+
+### Air Density ($\rho$)
+
+Precision is maintained by calculating the density of moist air using the **Magnus-Tetens** approximation:
+
 
 $$\rho = \frac{p_{dry}}{R_d \cdot T} + \frac{p_{vapor}}{R_v \cdot T}$$
 
+### Volumetric Flow ($Q$)
 
-### Volumestroom ($$Q$$)
+Calculated based on the pressure differential across the Venturi throat:
 
-Het debiet door de Venturi wordt berekend via:
 
 $$Q = 3600 \cdot C_d \cdot A_{throat} \cdot \sqrt{\frac{2 \cdot \Delta P}{\rho \cdot (1 - \beta^4)}}$$
 
-Waarin Beta ($$\beta$$) gelijk is aan:
+Which Beta ($$\beta$$) equals to:
 
 $$\beta = \frac{D_{throat}}{D_{inlet}}$$
- 
----
-
-## 5. Installatie & Gebruik
-
-### Software Configuratie
-
-Zorg dat de `Wire` bussen correct worden geïnitialiseerd in de Arduino IDE:
-
-```cpp
-TwoWire I2C_0 = TwoWire(0);
-TwoWire I2C_1 = TwoWire(1);
-
-void setup() {
-  I2C_0.begin(21, 22); // Hoofdbus
-  I2C_1.begin(25, 26); // Secundaire bus voor nuldruk
-}
-
-```
-
-### Voeding
-
-* **Debietmeter:** 12V 2A adapter.
-* **Testbank:** 12V 5A adapter (vanwege de krachtige S12038 ventilator).
-* Gebruik een kwalitatieve 12V->5V step-down converter voor de ESP32.
 
 ---
 
-## 6. Kalibratie
+## 6. Manufacturing & Assembly
 
-1. **Luchtdichtheid:** Controleer of de BME280 de juiste omgevingswaarden geeft.
-2. **Nul-meting:** Kalibreer de SDP800 sensoren bij stilstaande lucht.
-3. **K-factor:** Gebruik de testbank om de *Discharge Coefficient* ($$C_d$$) van uw specifieke 3D-print te bepalen (startwaarde: 0.975).
+### 3D Printing
+
+* **Material:** **PETG** (0.2mm layer height) for structural integrity and heat resistance.
+* **Venturi Tube:** Printed in three sections (Inlet, Throat, Outlet) and bonded with **epoxy resin**.
+* **Direct Drive:** Highly recommended to minimize stringing in PETG parts.
+
+### Aerodynamics & Pressure Sensing
+
+* **Dual Piezometric Rings:** The final Venturi design features integrated pressure rings at both the inlet and the throat. Each ring averages the static pressure from multiple points to ensure high accuracy.
+* **Flow Hood Sensing:** The flow hood utilizes a 12-port averaging ring (2.5mm ports) to provide a stable signal for the zero-pressure logic.
+* **Reversible Adapters:** Custom adapters allow the flow hood to be mounted on either side of the core assembly. This allows switching between supply and extract measurements while maintaining optimal aerodynamic orientation for the fan and Venturi.
 
 ---
 
-## Licentie
+## 7. License
 
-Dit project is gelicenseerd onder de **MIT-licentie**. Voel u vrij om het te verbeteren en te delen!
+This project is licensed under the **MIT License**.
 
 ---
