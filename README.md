@@ -76,7 +76,7 @@ Calculated based on the pressure differential across the Venturi throat:
 
 $$Q = 3600 \cdot C_d \cdot A_{throat} \cdot \sqrt{\frac{2 \cdot \Delta P}{\rho \cdot (1 - \beta^4)}}$$
 
-Which Beta ($$\beta$$) equals to:
+Where Beta ($$\beta$$) equals to:
 
 $$\beta = \frac{D_{throat}}{D_{inlet}}$$
 
