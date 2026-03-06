@@ -54,8 +54,8 @@ The screen is optimized for the SH110X library using `textsize 1` and `textsize 
 
 The device uses a "Live-Trim" methodology. Settings are automatically saved to the active profile in the **NVS Flash** memory (`Preferences.h`).
 
-* **Tune Zero-Comp:** Adjust the setpoint (range -25 to +25 Pa) while connected to the [test bench](https:\\https://github.com/Cortronic/testbench_airflowmeter) to compensate for air impingement (common in radial valves).
-* **Tune Flow:** Rotate the encoder to align the meter's flow reading with the [reference Test Bench](https:\\https://github.com/Cortronic/testbench_airflowmeter).
+* **Tune Zero-Comp:** Adjust the setpoint (range -25 to +25 Pa) while connected to the [test bench](https://github.com/Cortronic/testbench_airflowmeter) to compensate for air impingement (common in radial valves).
+* **Tune Flow:** Rotate the encoder to align the meter's flow reading with the [reference Test Bench](https://github.com/Cortronic/testbench_airflowmeter).
 * **Tune PID:** Select P, I, or D using **inverse video highlighting**. Adjust parameters in real-time and observe fan stability immediately.
 
 ---
