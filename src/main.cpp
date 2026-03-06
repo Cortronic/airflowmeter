@@ -366,17 +366,17 @@ void initNextMode(ModeType type) {
    modeType = type;
 
   switch (type) {
+    
     case MT_SELECT:
-      numberSelector.setRange(1, 5
-        ,  1, true, 0);
+      numberSelector.setRange(1, 5,  1, true, 0);
       numberSelector.setValue(MT_SELECT_HOOD);
       displaySelectMode(MT_SELECT_HOOD);
       break;
 
     case MT_SELECT_HOOD:
       numberSelector.setRange(0, 3,  1, true, 0);
-      numberSelector.setValue(HOOD_A_RETURN_VALVE);
-      displaySelectHoodMode(HOOD_A_RETURN_VALVE);
+      numberSelector.setValue(hoodValveType);
+      displaySelectHoodMode(hoodValveType);
       break;
 
     case MT_MEASURE:
@@ -416,6 +416,14 @@ void on_button_short_click() {
   // pidSetpoint = compensationFactorB = numberSelector.getValue();
   // compensationFactorA = flow.get();
   switch (modeType) {
+    
+    case MT_MEASURE:
+      modeType = MT_SELECT_HOOD;
+      numberSelector.setRange(0, 3,  1, true, 0);
+      numberSelector.setValue(hoodValveType);
+      displaySelectHoodMode(hoodValveType);
+      break;
+
     case MT_SELECT:
       initNextMode((ModeType)(uint8_t)numberSelector.getValue()); 
       break;
@@ -424,9 +432,6 @@ void on_button_short_click() {
       modeType = MT_MEASURE;
       setHoodValveType((HoodValveType)(uint8_t)numberSelector.getValue());
       displayMeasurements();
-      break;
-
-    case MT_MEASURE:
       break;
 
     case MT_CALIBRATE_ZERO_COMPENSATION:
