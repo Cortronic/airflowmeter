@@ -82,7 +82,7 @@ hw_timer_t *timer0 = nullptr;
 volatile bool ms10_passed = false;
 
 ModeType modeType = MT_MEASURE;
-HoodValveType hoodValveType = HOOD_A_RETURN_VALVE;
+ValveType valveType = VT_EXTRACT_RADIAL;
 PidTuneType pidTuneType = PID_TUNE_NONE;
 
 bool direction = false; // false for return
@@ -114,7 +114,7 @@ static void  displayTextNumber(const char *txt, float);
 static void  displayMeasurements();
 static void  displaySelectMode(ModeType);
 static void  displaySelectTunePID(PidTuneType type);
-static void  displaySelectHoodMode(HoodValveType);
+static void  displaySelectValveMode(ValveType type);
 static void  displayCoefficientFlow();
 static void  displayCoefficientZeroCompensation();
 static void  initBME280();
@@ -175,17 +175,17 @@ void setupRotaryEncoder() {
 }
 //////////////////////////////////////////////////////////////////////////
 
-void setHoodValveType(HoodValveType type) {
-  hoodValveType = type;
+void setValveType(ValveType type) {
+  valveType = type;
   
   switch(type) {
-    case HOOD_A_RETURN_VALVE:
-    case HOOD_B_RETURN_VALVE:
+    case VT_EXTRACT_AXIAL:
+    case VT_EXTRACT_RADIAL:
       direction = false;
       break;
     
-    case HOOD_A_SUPPLY_VALVE:  
-    case HOOD_B_SUPPLY_VALVE:
+    case VT_SUPPLY_AXIAL:  
+    case VT_SUPPLY_RADIAL:
       direction = true;
       break;
   }
@@ -331,14 +331,14 @@ void setup() {
 //////////////////////////////////////////////////////////////////////////
 
 float getZeroCompensationFactor() {
-  switch (hoodValveType) {
-    case HOOD_A_RETURN_VALVE:
+  switch (valveType) {
+    case VT_EXTRACT_AXIAL:
       return compensationFactorRA;
-    case HOOD_B_RETURN_VALVE:
+    case VT_EXTRACT_RADIAL:
       return compensationFactorRB;
-    case HOOD_A_SUPPLY_VALVE:
+    case VT_SUPPLY_AXIAL:
       return compensationFactorSA;
-    case HOOD_B_SUPPLY_VALVE:
+    case VT_SUPPLY_RADIAL:
       return compensationFactorSB; 
   }
   return 0.0;
@@ -346,17 +346,17 @@ float getZeroCompensationFactor() {
 //////////////////////////////////////////////////////////////////////////
 
 void setZeroCompensationFactor(float factor) {
-  switch (hoodValveType) {
-    case HOOD_A_RETURN_VALVE:
+  switch (valveType) {
+    case VT_EXTRACT_AXIAL:
       compensationFactorRA = factor;
       break;
-    case HOOD_B_RETURN_VALVE:
+    case VT_EXTRACT_RADIAL:
       compensationFactorRB = factor;
       break;
-    case HOOD_A_SUPPLY_VALVE:
+    case VT_SUPPLY_AXIAL:
       compensationFactorSA = factor;
       break;
-    case HOOD_B_SUPPLY_VALVE:
+    case VT_SUPPLY_RADIAL:
       compensationFactorSB = factor; 
       break;
   }
@@ -364,20 +364,20 @@ void setZeroCompensationFactor(float factor) {
 //////////////////////////////////////////////////////////////////////////
 
 void saveZeroCompensationFactor(float factor) {
-  switch (hoodValveType) {
-    case HOOD_A_RETURN_VALVE:
+  switch (valveType) {
+    case VT_EXTRACT_AXIAL:
       compensationFactorRA = factor;
       saveFloat("compFactRA", compensationFactorRA);
       break;
-    case HOOD_B_RETURN_VALVE:
+    case VT_EXTRACT_RADIAL:
       compensationFactorRB = factor;
       saveFloat("compFactRB", compensationFactorRB);
       break;
-    case HOOD_A_SUPPLY_VALVE:
+    case VT_SUPPLY_AXIAL:
       compensationFactorSA = factor;
       saveFloat("compFactSA", compensationFactorSA);
       break;
-    case HOOD_B_SUPPLY_VALVE:
+    case VT_SUPPLY_RADIAL:
       compensationFactorSB = factor; 
       saveFloat("compFactSB", compensationFactorSB);
       break;
@@ -386,20 +386,20 @@ void saveZeroCompensationFactor(float factor) {
 //////////////////////////////////////////////////////////////////////////
 
 void restoreZeroCompensationFactors() {
-  switch(hoodValveType) {
-    case HOOD_A_RETURN_VALVE:
+  switch(valveType) {
+    case VT_EXTRACT_AXIAL:
       compensationFactorRA = getFloat("compFactRA", 0.0);
       pidSetpoint = compensationFactorRA * flowPressure.get();
       break;
-    case HOOD_B_RETURN_VALVE:
+    case VT_EXTRACT_RADIAL:
       compensationFactorRB = getFloat("compFactRB", 0.0);
       pidSetpoint = compensationFactorRB * flowPressure.get();
       break;
-    case HOOD_A_SUPPLY_VALVE:
+    case VT_SUPPLY_AXIAL:
       compensationFactorSA = getFloat("compFactSA", 0.0);
       pidSetpoint = compensationFactorSA * flowPressure.get();
       break;
-    case HOOD_B_SUPPLY_VALVE:
+    case VT_SUPPLY_RADIAL:
       compensationFactorSB = getFloat("compFactSB", 0.0); 
       pidSetpoint = compensationFactorSB * flowPressure.get();
       break;
@@ -425,14 +425,14 @@ void initNextMode(ModeType type) {
     
     case MT_SELECT:
       numberSelector.setRange(1, 5,  1, true, 0);
-      numberSelector.setValue(MT_SELECT_HOOD);
-      displaySelectMode(MT_SELECT_HOOD);
+      numberSelector.setValue(MT_SELECT_VALVE);
+      displaySelectMode(MT_SELECT_VALVE);
       break;
 
-    case MT_SELECT_HOOD:
+    case MT_SELECT_VALVE:
       numberSelector.setRange(0, 3,  1, true, 0);
-      numberSelector.setValue(hoodValveType);
-      displaySelectHoodMode(hoodValveType);
+      numberSelector.setValue(valveType);
+      displaySelectValveMode(valveType);
       break;
 
     case MT_MEASURE:
@@ -446,13 +446,13 @@ void initNextMode(ModeType type) {
 
     case MT_CALIBRATE_FLOW:
       numberSelector.setRange(0.8, 1.2, 0.001, false, 3);
-      switch (hoodValveType) {
-        case HOOD_A_RETURN_VALVE:
-        case HOOD_B_RETURN_VALVE:  
+      switch (valveType) {
+        case VT_EXTRACT_AXIAL:
+        case VT_EXTRACT_RADIAL:
           numberSelector.setValue(getFloat("coefReturn", 1.0));
           break;
-        case HOOD_A_SUPPLY_VALVE:
-        case HOOD_B_SUPPLY_VALVE:
+        case VT_SUPPLY_AXIAL:
+        case VT_SUPPLY_RADIAL:
           numberSelector.setValue(getFloat("coefSupply", 1.0));
           break;
       }
@@ -474,19 +474,19 @@ void on_button_short_click() {
   switch (modeType) {
     
     case MT_MEASURE:
-      modeType = MT_SELECT_HOOD;
+      modeType = MT_SELECT_VALVE;
       numberSelector.setRange(0, 3,  1, true, 0);
-      numberSelector.setValue(hoodValveType);
-      displaySelectHoodMode(hoodValveType);
+      numberSelector.setValue(valveType);
+      displaySelectValveMode(valveType);
       break;
 
     case MT_SELECT:
       initNextMode((ModeType)(uint8_t)numberSelector.getValue()); 
       break;
 
-    case MT_SELECT_HOOD:
+    case MT_SELECT_VALVE:
       modeType = MT_MEASURE;
-      setHoodValveType((HoodValveType)(uint8_t)numberSelector.getValue());
+      setValveType((ValveType)(uint8_t)numberSelector.getValue());
       displayMeasurements();
       break;
 
@@ -498,13 +498,13 @@ void on_button_short_click() {
 
     case MT_CALIBRATE_FLOW:
       modeType = MT_MEASURE;
-      switch (hoodValveType) {
-        case HOOD_A_RETURN_VALVE:
-        case HOOD_B_RETURN_VALVE:
+      switch (valveType) {
+        case VT_EXTRACT_AXIAL:
+        case VT_EXTRACT_RADIAL:
           saveFloat("coefReturn", numberSelector.getValue());
           break;
-        case HOOD_A_SUPPLY_VALVE:
-        case HOOD_B_SUPPLY_VALVE:
+        case VT_SUPPLY_AXIAL:
+        case VT_SUPPLY_RADIAL:
           saveFloat("coefSupply", numberSelector.getValue());
           break;
       }
@@ -614,8 +614,8 @@ void loopRotaryEncoder() {
         displaySelectMode((ModeType)(uint8_t)numberSelector.getValue()); 
         break;
       
-      case MT_SELECT_HOOD:
-        displaySelectHoodMode((HoodValveType)(uint8_t)numberSelector.getValue());
+      case MT_SELECT_VALVE:
+        displaySelectValveMode((ValveType)(uint8_t)numberSelector.getValue());
         break;
       
       case MT_MEASURE:
@@ -628,13 +628,13 @@ void loopRotaryEncoder() {
         break;
 
       case MT_CALIBRATE_FLOW:
-        switch (hoodValveType) {
-          case HOOD_A_RETURN_VALVE:
-          case HOOD_B_RETURN_VALVE: 
+        switch (valveType) {
+          case VT_EXTRACT_AXIAL:
+          case VT_EXTRACT_RADIAL:
             flowFactorReturn = flowFactor * numberSelector.getValue();
             break;
-          case HOOD_A_SUPPLY_VALVE:
-          case HOOD_B_SUPPLY_VALVE:
+          case VT_SUPPLY_AXIAL:
+          case VT_SUPPLY_RADIAL:
             flowFactorSupply = flowFactor * numberSelector.getValue();
             break;
         }
@@ -950,17 +950,17 @@ static void displayCoefficientFlow() {
 }
 //////////////////////////////////////////////////////////////////////////
 
-static const char* getHoodValveText() {
+static const char* getHoodValveText(ValveType type) {
 
-  switch (hoodValveType) {
-    case HOOD_A_RETURN_VALVE:
-      return "RETURN_A";
-    case HOOD_A_SUPPLY_VALVE:
-      return "SUPPLY_A";
-    case HOOD_B_RETURN_VALVE:
-      return "RETURN_B";
-    case HOOD_B_SUPPLY_VALVE:
-      return "SUPPLY_B";
+  switch (type) {
+    case VT_EXTRACT_AXIAL:
+      return "EXTRACT_AX";
+    case VT_EXTRACT_RADIAL:
+      return "EXTRACT_RD";
+    case VT_SUPPLY_AXIAL:
+      return "SUPPLY_AX";
+    case VT_SUPPLY_RADIAL:
+      return "SUPPLY_RD";
   }
   return "        ";
 }
@@ -1010,7 +1010,7 @@ static void displayMeasurements() {
   readPressureSensors();
 
   // display current hood valve type
-  printAlignRight(getHoodValveText(), 127, 0);
+  printAlignRight(getHoodValveText(valveType), 127, 0);
   readPressureSensors();
 
   // display flow
@@ -1056,10 +1056,10 @@ static void displaySelectMode(ModeType mtype) {
   display.clearDisplay();
   display.setTextSize(1);
 
-  if (mtype == MT_SELECT_HOOD) display.setTextColor(SH110X_BLACK, SH110X_WHITE);
+  if (mtype == MT_SELECT_VALVE) display.setTextColor(SH110X_BLACK, SH110X_WHITE);
   display.setCursor(0, 1);
-  display.print("Select Hood");
-  if (mtype == MT_SELECT_HOOD) display.setTextColor(SH110X_WHITE, SH110X_BLACK);
+  display.print("Select Valve");
+  if (mtype == MT_SELECT_VALVE) display.setTextColor(SH110X_WHITE, SH110X_BLACK);
 
   if (mtype == MT_MEASURE)  display.setTextColor(SH110X_BLACK, SH110X_WHITE);
   display.setCursor(0, 10);
@@ -1114,29 +1114,29 @@ static void displaySelectTunePID(PidTuneType type) {
 }
 //////////////////////////////////////////////////////////////////////////
 
-static void  displaySelectHoodMode(HoodValveType type) {
+static void  displaySelectValveMode(ValveType type) {
   display.clearDisplay();
   display.setTextSize(1);
 
-  if (type == HOOD_A_RETURN_VALVE) display.setTextColor(SH110X_BLACK, SH110X_WHITE);
+  if (type == VT_EXTRACT_AXIAL) display.setTextColor(SH110X_BLACK, SH110X_WHITE);
   display.setCursor(0, 0);
-  display.print("Return Hood A");
-  if (type == HOOD_A_RETURN_VALVE) display.setTextColor(SH110X_WHITE, SH110X_BLACK);
+  display.print("Extract Axial");
+  if (type == VT_EXTRACT_AXIAL) display.setTextColor(SH110X_WHITE, SH110X_BLACK);
 
-  if (type == HOOD_A_SUPPLY_VALVE)  display.setTextColor(SH110X_BLACK, SH110X_WHITE);
+  if (type == VT_EXTRACT_RADIAL)  display.setTextColor(SH110X_BLACK, SH110X_WHITE);
   display.setCursor(0, 8);
-  display.print("Supply Hood A");
-  if (type == HOOD_A_SUPPLY_VALVE) display.setTextColor(SH110X_WHITE, SH110X_BLACK);
+  display.print("Extraxt Radial");
+  if (type == VT_EXTRACT_RADIAL) display.setTextColor(SH110X_WHITE, SH110X_BLACK);
 
-  if (type == HOOD_B_RETURN_VALVE) display.setTextColor(SH110X_BLACK, SH110X_WHITE);
+  if (type == VT_SUPPLY_AXIAL) display.setTextColor(SH110X_BLACK, SH110X_WHITE);
   display.setCursor(0, 16);
-  display.print("Return Hood B");
-  if (type == HOOD_B_RETURN_VALVE) display.setTextColor(SH110X_WHITE, SH110X_BLACK);
-  
-  if (type == HOOD_B_SUPPLY_VALVE) display.setTextColor(SH110X_BLACK, SH110X_WHITE);
+  display.print("Supply Axial");
+  if (type == VT_SUPPLY_AXIAL) display.setTextColor(SH110X_WHITE, SH110X_BLACK);
+
+  if (type == VT_SUPPLY_RADIAL) display.setTextColor(SH110X_BLACK, SH110X_WHITE);
   display.setCursor(0, 24);
-  display.print("Supply Hood B");
-  if (type == HOOD_B_SUPPLY_VALVE) display.setTextColor(SH110X_WHITE, SH110X_BLACK);
+  display.print("Supply Radial");
+  if (type == VT_SUPPLY_RADIAL) display.setTextColor(SH110X_WHITE, SH110X_BLACK);
 
   display.display();
 
@@ -1158,12 +1158,12 @@ static void  displaySelectHoodMode(HoodValveType type) {
 
 static float getHoodValveCoefficient() {
 
-  switch (hoodValveType) {
-    case HOOD_A_RETURN_VALVE:
-    case HOOD_B_RETURN_VALVE:
+  switch (valveType) {
+    case VT_EXTRACT_AXIAL:
+    case VT_EXTRACT_RADIAL:
       return flowFactorReturn;
-    case HOOD_A_SUPPLY_VALVE:
-    case HOOD_B_SUPPLY_VALVE:
+    case VT_SUPPLY_AXIAL:
+    case VT_SUPPLY_RADIAL:
       return flowFactorSupply;
   }
   return 0.0;

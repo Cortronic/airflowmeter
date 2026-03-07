@@ -1,7 +1,7 @@
 
 typedef enum {
   MT_SELECT = 0,
-  MT_SELECT_HOOD = 1,
+  MT_SELECT_VALVE = 1,
   MT_MEASURE = 2,
   MT_CALIBRATE_ZERO_COMPENSATION = 3,
   MT_CALIBRATE_FLOW = 4,
@@ -10,12 +10,12 @@ typedef enum {
 extern ModeType modeType;
 
 typedef enum {
-  HOOD_A_RETURN_VALVE = 0,
-  HOOD_A_SUPPLY_VALVE = 1,
-  HOOD_B_RETURN_VALVE = 2,
-  HOOD_B_SUPPLY_VALVE = 3,
-} HoodValveType;
-extern HoodValveType hoodValveType;
+  VT_EXTRACT_AXIAL = 0,
+  VT_EXTRACT_RADIAL = 1,
+  VT_SUPPLY_AXIAL = 2,
+  VT_SUPPLY_RADIAL = 3,
+} ValveType;
+extern ValveType valveType;
 
 typedef enum {
   PID_TUNE_NONE = 0,
