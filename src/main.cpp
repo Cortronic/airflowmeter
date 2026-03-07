@@ -70,7 +70,12 @@ Smoothed<float> pressureAmbient;
 Smoothed<float> temperatureAmbient;
 Smoothed<float> humidityAmbient;
 
-// Twee hardware I2C bussen
+/**
+ * Two hardware I2C busses, one for the display, the BME280 and one SPD810 sensor.
+ * The other for the second SDP810 sensor, to avoid interference between the two sensors.
+ * The display and BME280 are on the same bus as they are not time critical and can handle the occasional delay 
+ * and do not interfere with the timing of the SDP810 sensors.
+ */
 TwoWire I2C_A = TwoWire(0);
 TwoWire I2C_B = TwoWire(1);
 
@@ -78,13 +83,8 @@ SensirionI2CSdp sdpFlow;
 SensirionI2CSdp sdpZero;
 
 // Initialize the OLED display using Wire library
-// ADDRESS, SDA, SCL  -  SDA and SCL usually populate automatically
-// based on your board's pins_arduino.h 
-// e.g. https://github.com/esp8266/Arduino/blob/master/variants/nodemcu/pins_arduino.h
-// SH1106Wire      display(I2C_ADDRESS_DISPLAY, I2C_SDA0_PIN, I2C_SCL0_PIN, GEOMETRY_128_64);
 Adafruit_SH1106G display(128, 64, &I2C_A);
-Adafruit_BME280  bme280;     // I2C
-
+Adafruit_BME280  bme280;     
 hw_timer_t *timer0 = nullptr;
 volatile bool ms10_passed = false;
 
@@ -120,10 +120,10 @@ static void  initDisplay(void);
 static void  displayTextNumber(const char *txt, float);
 static void  displayMeasurements();
 static void  displaySelectMode(ModeType);
-static void displaySelectTunePID(PidTuneType type);
+static void  displaySelectTunePID(PidTuneType type);
 static void  displaySelectHoodMode(HoodValveType);
 static void  displayCoefficientFlow();
-static void  displaySetpointZeroCompensation();
+static void  displayCoefficientZeroCompensation();
 static void  initBME280();
 static void  initSDP(SensirionI2CSdp&, TwoWire&);
 static float calculateFlow(float dP);
@@ -220,7 +220,7 @@ void saveFloat(const char* key, float value) {
 void init() {
   preferences.begin("airflow", true);
   float temp = preferences.getFloat("coefReturn", 0.0);
-   if (temp >= 0.8 && temp <= 1.2)
+  if (temp >= 0.8 && temp <= 1.2)
     flowFactorReturn = flowFactor * temp;
   temp = preferences.getFloat("coefSupply", 0.0);
   if (temp >= 0.8 && temp <= 1.2)
@@ -341,21 +341,88 @@ void setup() {
 }
 //////////////////////////////////////////////////////////////////////////
 
-float calculateCompensationPressure() {
+float getZeroCompensationFactor() {
+  switch (hoodValveType) {
+    case HOOD_A_RETURN_VALVE:
+      return compensationFactorRA;
+    case HOOD_B_RETURN_VALVE:
+      return compensationFactorRB;
+    case HOOD_A_SUPPLY_VALVE:
+      return compensationFactorSA;
+    case HOOD_B_SUPPLY_VALVE:
+      return compensationFactorSB; 
+  }
+  return 0.0;
+}
+//////////////////////////////////////////////////////////////////////////
+
+void setZeroCompensationFactor(float factor) {
+  switch (hoodValveType) {
+    case HOOD_A_RETURN_VALVE:
+      compensationFactorRA = factor;
+      break;
+    case HOOD_B_RETURN_VALVE:
+      compensationFactorRB = factor;
+      break;
+    case HOOD_A_SUPPLY_VALVE:
+      compensationFactorSA = factor;
+      break;
+    case HOOD_B_SUPPLY_VALVE:
+      compensationFactorSB = factor; 
+      break;
+  }
+}
+//////////////////////////////////////////////////////////////////////////
+
+void saveZeroCompensationFactor(float factor) {
+  switch (hoodValveType) {
+    case HOOD_A_RETURN_VALVE:
+      compensationFactorRA = factor;
+      saveFloat("compFactRA", compensationFactorRA);
+      break;
+    case HOOD_B_RETURN_VALVE:
+      compensationFactorRB = factor;
+      saveFloat("compFactRB", compensationFactorRB);
+      break;
+    case HOOD_A_SUPPLY_VALVE:
+      compensationFactorSA = factor;
+      saveFloat("compFactSA", compensationFactorSA);
+      break;
+    case HOOD_B_SUPPLY_VALVE:
+      compensationFactorSB = factor; 
+      saveFloat("compFactSB", compensationFactorSB);
+      break;
+  }
+}
+//////////////////////////////////////////////////////////////////////////
+
+void restoreZeroCompensationFactors() {
+  switch(hoodValveType) {
+    case HOOD_A_RETURN_VALVE:
+      compensationFactorRA = getFloat("compFactRA", 0.0);
+      pidSetpoint = compensationFactorRA * flowPressure.get();
+      break;
+    case HOOD_B_RETURN_VALVE:
+      compensationFactorRB = getFloat("compFactRB", 0.0);
+      pidSetpoint = compensationFactorRB * flowPressure.get();
+      break;
+    case HOOD_A_SUPPLY_VALVE:
+      compensationFactorSA = getFloat("compFactSA", 0.0);
+      pidSetpoint = compensationFactorSA * flowPressure.get();
+      break;
+    case HOOD_B_SUPPLY_VALVE:
+      compensationFactorSB = getFloat("compFactSB", 0.0); 
+      pidSetpoint = compensationFactorSB * flowPressure.get();
+      break;
+  }
+}
+////////////////////////////////////////////////////////////////////////// 
+
+float calculateZeroCompensationPressure() {
   float fp = flowPressure.get();
 
   if (fp >= 0.5) {
-    switch (hoodValveType) {
-      case HOOD_A_RETURN_VALVE:
-        return compensationFactorRA * fp;
-      case HOOD_B_RETURN_VALVE:
-        return compensationFactorRB * fp;
-      case HOOD_A_SUPPLY_VALVE:
-        return compensationFactorSA * fp;
-      case HOOD_B_SUPPLY_VALVE:
-        return compensationFactorSB * fp; 
-        break; 
-    }
+    return getZeroCompensationFactor() * fp;
   }
   return 0.0;
 }
@@ -383,8 +450,8 @@ void initNextMode(ModeType type) {
       break; 
 
     case MT_CALIBRATE_ZERO_COMPENSATION:
-      numberSelector.setRange(ZERO_COMP_MIN, ZERO_COMP_MAX, ZERO_COMP_STEP, false, 1);
-      numberSelector.setValue(pidSetpoint);
+      numberSelector.setRange(ZERO_COMP_MIN, ZERO_COMP_MAX, ZERO_COMP_STEP, false, 3);
+      numberSelector.setValue(getZeroCompensationFactor());
       displayMeasurements();
       break;
 
@@ -436,24 +503,8 @@ void on_button_short_click() {
 
     case MT_CALIBRATE_ZERO_COMPENSATION:
       modeType = MT_MEASURE;
-      switch (hoodValveType) {
-        case HOOD_A_RETURN_VALVE:
-          compensationFactorRA = numberSelector.getValue() / flowPressure.get();
-          saveFloat("compFactRA", compensationFactorRA);
-          break;
-        case HOOD_B_RETURN_VALVE: 
-          compensationFactorRB = numberSelector.getValue() / flowPressure.get();
-          saveFloat("compFactRB", compensationFactorRB);
-          break;
-        case HOOD_A_SUPPLY_VALVE:
-          compensationFactorSA = numberSelector.getValue() / flowPressure.get();
-          saveFloat("compFactSA", compensationFactorSA);
-          break;
-        case HOOD_B_SUPPLY_VALVE:
-          compensationFactorSB = numberSelector.getValue() / flowPressure.get();
-          saveFloat("compFactSB", compensationFactorSB);
-          break;
-      }
+      saveZeroCompensationFactor(numberSelector.getValue());
+      displayMeasurements();
       break;
 
     case MT_CALIBRATE_FLOW:
@@ -527,6 +578,13 @@ void on_button_long_click() {
     case MT_MEASURE:
       initNextMode(MT_SELECT);
       break;
+
+    case MT_CALIBRATE_ZERO_COMPENSATION:
+      restoreZeroCompensationFactors();
+      modeType = MT_MEASURE;
+      displayMeasurements();
+      break;
+
     default:
       break;
   }
@@ -575,8 +633,9 @@ void loopRotaryEncoder() {
         break;
       
       case MT_CALIBRATE_ZERO_COMPENSATION:
-        pidSetpoint = numberSelector.getValue();
-        displaySetpointZeroCompensation();
+        setZeroCompensationFactor(numberSelector.getValue());
+        pidSetpoint = numberSelector.getValue() * flowPressure.get();
+        displayCoefficientZeroCompensation();
         break;
 
       case MT_CALIBRATE_FLOW:
@@ -711,7 +770,7 @@ void loop() {
         ) {
         displayMeasurements(); // takes 42ms
         if (modeType == MT_MEASURE || modeType == MT_CALIBRATE_FLOW) {
-          pidSetpoint = calculateCompensationPressure();
+          pidSetpoint = calculateZeroCompensationPressure();
         }
       }
       //Serial.printf("Loop duaration: %u\n", millis() - ms);
@@ -880,11 +939,11 @@ static void drawString(int16_t x, int16_t y, const String &text) {
 }
 //////////////////////////////////////////////////////////////////////////
 
-static void displaySetpointZeroCompensation() {
+static void displayCoefficientZeroCompensation() {
   // display setpoint zero pressure
   display.setTextSize(1);
   display.setCursor(0, 0);
-  display.printf("Sp %.1fPa ", pidSetpoint);
+  display.printf("Cz: %.3f", numberSelector.getValue());
   readPressureSensors();
   display.display();
   readPressureSensors();
@@ -942,9 +1001,11 @@ static void displayMeasurements() {
   display.setTextSize(1);
   display.setCursor(0, 0);
 
-  if (modeType == MT_CALIBRATE_FLOW) {
+  if (modeType == MT_CALIBRATE_ZERO_COMPENSATION) {
+    display.printf("Cz: %.3f", numberSelector.getValue());
+  } else if (modeType == MT_CALIBRATE_FLOW) {
     display.printf("Cd: %.3f", numberSelector.getValue());
-  } else if (pidTuneType ==PID_TUNE_P) {
+  } else if (pidTuneType == PID_TUNE_P) {
     // display proportional gain PID controller
     display.printf("Kp: %.2f", numberSelector.getValue());
   } else if (pidTuneType == PID_TUNE_I) {

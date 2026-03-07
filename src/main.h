@@ -25,6 +25,6 @@ typedef enum {
 } PidTuneType;
 extern PidTuneType pidTuneType;
 
-#define ZERO_COMP_MIN -25.0
-#define ZERO_COMP_MAX 25.0
-#define ZERO_COMP_STEP 0.1
+#define ZERO_COMP_MIN -0.5
+#define ZERO_COMP_MAX 0.5
+#define ZERO_COMP_STEP 0.001
