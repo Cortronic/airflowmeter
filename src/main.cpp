@@ -21,10 +21,6 @@ const float flowFactor = 260.28;
 
 // Pin definitions
 const int PWM_FAN_PIN = 27;  // 12 = GPIO 32
-const int PWM_CAL_PIN = 14;
-const int CAL_PIN = A0;     // GPIO 36 = A0 = VP
-const int ZERO_PIN = A6;    // GPIO 34 = A6
-const int FLOW_PIN = A7;    // GPIO 35 = A7, uses any valid Ax pin as you wish
 
 // 12C pins
 const int I2C_SDA0_PIN = 21;
@@ -45,11 +41,8 @@ const int I2C_ADDRESS_SDP810  = 0x25;
 
 // PWM settings
 const int PWM_FAN_CHAN = LEDC_CHANNEL_0;
-const int PWM_CAL_CHAN = LEDC_CHANNEL_4;
 const int PWM_FREQ = 25000;    // 25 kHz frequency for computer fans
-const int CAL_FREQ = 5000;     // 5 KHz
 const int PWM_RESOLUTION = 10; // 10-bit resolution (0-1023)
-const int CAL_RESOLUTION = 12; // 12-bit resolution (0-4095)
 
 //paramaters for button
 const unsigned long shortPressAfterMiliseconds = 50;   // how long short press shoud be.
@@ -245,12 +238,8 @@ void setup() {
   Serial.println("Setup PWM");
   ledcSetup(PWM_FAN_CHAN, PWM_FREQ, PWM_RESOLUTION);
   ledcAttachPin(PWM_FAN_PIN, PWM_FAN_CHAN);
-  ledcSetup(PWM_CAL_CHAN, CAL_FREQ, CAL_RESOLUTION);
-  ledcAttachPin(PWM_CAL_PIN, PWM_CAL_CHAN);
- 
   // Set initial fan speed to zero
   ledcWrite(PWM_FAN_CHAN, 0);
-  ledcWrite(PWM_CAL_CHAN, 0);
   delay(1000);
 
   analogReadResolution(12);
