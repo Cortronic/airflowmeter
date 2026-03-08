@@ -20,7 +20,7 @@ const float Creturn = 1.03;
 const float flowFactor = 260.28;
 
 // Pin definitions
-const int PWM_FAN_PIN = 27;  // 12 = GPIO 32
+const int PWM_FAN_PIN = 27; 
 
 // 12C pins
 const int I2C_SDA0_PIN = 21;
@@ -101,10 +101,10 @@ PID pid(&pidInput, &pidOutput, &pidSetpoint, Kp, Ki, Kd, REVERSE);
 float offsetZeroPressure;
 float offsetFlowPressure;
 
-float compensationFactorRA = 0.0;
-float compensationFactorRB = 0.0;
+float compensationFactorEA = 0.0;
+float compensationFactorER = 0.0;
 float compensationFactorSA = 0.0;
-float compensationFactorSB = 0.0;
+float compensationFactorSR = 0.0;
 
 float flowFactorSupply = Csupply * flowFactor;
 float flowFactorReturn = Creturn * flowFactor;
@@ -112,7 +112,7 @@ float flowFactorReturn = Creturn * flowFactor;
 static void  initDisplay(void);
 static void  displayTextNumber(const char *txt, float);
 static void  displayMeasurements();
-static void  displaySelectMode(ModeType);
+static void  displaySelectMode(ModeType type);
 static void  displaySelectTunePID(PidTuneType type);
 static void  displaySelectValveMode(ValveType type);
 static void  displayCoefficientFlow();
@@ -210,7 +210,7 @@ void saveFloat(const char* key, float value) {
 }
 //////////////////////////////////////////////////////////////////////////
 
-void init() {
+void loadPreferences() {
   preferences.begin("airflow", true);
   float temp = preferences.getFloat("coefReturn", 0.0);
   if (temp >= 0.8 && temp <= 1.2)
@@ -218,10 +218,10 @@ void init() {
   temp = preferences.getFloat("coefSupply", 0.0);
   if (temp >= 0.8 && temp <= 1.2)
     flowFactorSupply = flowFactor * temp;
-  compensationFactorRA = preferences.getFloat("compFactRA", 0.0);
-  compensationFactorRB = preferences.getFloat("compFactRB", 0.0);
+  compensationFactorEA = preferences.getFloat("compFactRA", 0.0);
+  compensationFactorER = preferences.getFloat("compFactRB", 0.0);
   compensationFactorSA = preferences.getFloat("compFactSA", 0.0);
-  compensationFactorSB = preferences.getFloat("compFactSA", 0.0);
+  compensationFactorSR = preferences.getFloat("compFactSB", 0.0);
   preferences.end();
 }
 //////////////////////////////////////////////////////////////////////////
@@ -230,6 +230,8 @@ void setup() {
   Serial.begin(115200);
 
   Serial.println("\nAirflowmeter is starting up...");
+
+  loadPreferences();
 
   // setup RotaryEncoder
   setupRotaryEncoder();
@@ -333,13 +335,13 @@ void setup() {
 float getZeroCompensationFactor() {
   switch (valveType) {
     case VT_EXTRACT_AXIAL:
-      return compensationFactorRA;
+      return compensationFactorEA;
     case VT_EXTRACT_RADIAL:
-      return compensationFactorRB;
+      return compensationFactorER;
     case VT_SUPPLY_AXIAL:
       return compensationFactorSA;
     case VT_SUPPLY_RADIAL:
-      return compensationFactorSB; 
+      return compensationFactorSR; 
   }
   return 0.0;
 }
@@ -348,16 +350,16 @@ float getZeroCompensationFactor() {
 void setZeroCompensationFactor(float factor) {
   switch (valveType) {
     case VT_EXTRACT_AXIAL:
-      compensationFactorRA = factor;
+      compensationFactorEA = factor;
       break;
     case VT_EXTRACT_RADIAL:
-      compensationFactorRB = factor;
+      compensationFactorER = factor;
       break;
     case VT_SUPPLY_AXIAL:
       compensationFactorSA = factor;
       break;
     case VT_SUPPLY_RADIAL:
-      compensationFactorSB = factor; 
+      compensationFactorSR = factor; 
       break;
   }
 }
@@ -366,20 +368,20 @@ void setZeroCompensationFactor(float factor) {
 void saveZeroCompensationFactor(float factor) {
   switch (valveType) {
     case VT_EXTRACT_AXIAL:
-      compensationFactorRA = factor;
-      saveFloat("compFactRA", compensationFactorRA);
+      compensationFactorEA = factor;
+      saveFloat("compFactRA", compensationFactorEA);
       break;
     case VT_EXTRACT_RADIAL:
-      compensationFactorRB = factor;
-      saveFloat("compFactRB", compensationFactorRB);
+      compensationFactorER = factor;
+      saveFloat("compFactRB", compensationFactorER);
       break;
     case VT_SUPPLY_AXIAL:
       compensationFactorSA = factor;
       saveFloat("compFactSA", compensationFactorSA);
       break;
     case VT_SUPPLY_RADIAL:
-      compensationFactorSB = factor; 
-      saveFloat("compFactSB", compensationFactorSB);
+      compensationFactorSR = factor; 
+      saveFloat("compFactSB", compensationFactorSR);
       break;
   }
 }
@@ -388,32 +390,27 @@ void saveZeroCompensationFactor(float factor) {
 void restoreZeroCompensationFactors() {
   switch(valveType) {
     case VT_EXTRACT_AXIAL:
-      compensationFactorRA = getFloat("compFactRA", 0.0);
-      pidSetpoint = compensationFactorRA * flowPressure.get();
+      compensationFactorEA = getFloat("compFactRA", 0.0);
+      pidSetpoint = compensationFactorEA * flowPressure.get();
       break;
     case VT_EXTRACT_RADIAL:
-      compensationFactorRB = getFloat("compFactRB", 0.0);
-      pidSetpoint = compensationFactorRB * flowPressure.get();
+      compensationFactorER = getFloat("compFactRB", 0.0);
+      pidSetpoint = compensationFactorER * flowPressure.get();
       break;
     case VT_SUPPLY_AXIAL:
       compensationFactorSA = getFloat("compFactSA", 0.0);
       pidSetpoint = compensationFactorSA * flowPressure.get();
       break;
     case VT_SUPPLY_RADIAL:
-      compensationFactorSB = getFloat("compFactSB", 0.0); 
-      pidSetpoint = compensationFactorSB * flowPressure.get();
+      compensationFactorSR = getFloat("compFactSB", 0.0); 
+      pidSetpoint = compensationFactorSR * flowPressure.get();
       break;
   }
 }
 ////////////////////////////////////////////////////////////////////////// 
 
 float calculateZeroCompensationPressure() {
-  float fp = flowPressure.get();
-
-  if (fp >= 0.5) {
-    return getZeroCompensationFactor() * fp;
-  }
-  return 0.0;
+  return getZeroCompensationFactor() * flowPressure.get();
 }
 //////////////////////////////////////////////////////////////////////////
 
@@ -438,7 +435,7 @@ void initNextMode(ModeType type) {
     case MT_MEASURE:
       break; 
 
-    case MT_CALIBRATE_ZERO_COMPENSATION:
+    case MT_TUNE_ZERO_COMPENSATION:
       numberSelector.setRange(ZERO_COMP_MIN, ZERO_COMP_MAX, ZERO_COMP_STEP, false, 3);
       numberSelector.setValue(getZeroCompensationFactor());
       displayMeasurements();
@@ -490,7 +487,7 @@ void on_button_short_click() {
       displayMeasurements();
       break;
 
-    case MT_CALIBRATE_ZERO_COMPENSATION:
+    case MT_TUNE_ZERO_COMPENSATION:
       modeType = MT_MEASURE;
       saveZeroCompensationFactor(numberSelector.getValue());
       displayMeasurements();
@@ -568,7 +565,7 @@ void on_button_long_click() {
       initNextMode(MT_SELECT);
       break;
 
-    case MT_CALIBRATE_ZERO_COMPENSATION:
+    case MT_TUNE_ZERO_COMPENSATION:
       restoreZeroCompensationFactors();
       modeType = MT_MEASURE;
       displayMeasurements();
@@ -621,9 +618,8 @@ void loopRotaryEncoder() {
       case MT_MEASURE:
         break;
       
-      case MT_CALIBRATE_ZERO_COMPENSATION:
+      case MT_TUNE_ZERO_COMPENSATION:
         setZeroCompensationFactor(numberSelector.getValue());
-        pidSetpoint = numberSelector.getValue() * flowPressure.get();
         displayCoefficientZeroCompensation();
         break;
 
@@ -714,7 +710,8 @@ void loop() {
     last_millis = ms;
 
     flow.add(calculateFlowCompensated(flowPressure.get()));
-    
+
+    pidSetpoint = calculateZeroCompensationPressure(); 
     pidInput = zeroPressure.get();
     
     pid.Compute();
@@ -751,18 +748,14 @@ void loop() {
     // every 2 seconds
     if (loopcnt++ % 20 == 0) {
       if (modeType == MT_MEASURE 
-          || modeType == MT_CALIBRATE_ZERO_COMPENSATION
+          || modeType == MT_TUNE_ZERO_COMPENSATION
           || modeType == MT_CALIBRATE_FLOW
           || pidTuneType == PID_TUNE_P
           || pidTuneType == PID_TUNE_I
           || pidTuneType == PID_TUNE_D
         ) {
         displayMeasurements(); // takes 42ms
-        if (modeType == MT_MEASURE || modeType == MT_CALIBRATE_FLOW) {
-          pidSetpoint = calculateZeroCompensationPressure();
-        }
       }
-      //Serial.printf("Loop duaration: %u\n", millis() - ms);
     }
   }
 }
@@ -990,7 +983,7 @@ static void displayMeasurements() {
   display.setTextSize(1);
   display.setCursor(0, 0);
 
-  if (modeType == MT_CALIBRATE_ZERO_COMPENSATION) {
+  if (modeType == MT_TUNE_ZERO_COMPENSATION) {
     display.printf("Cz: %.3f", numberSelector.getValue());
   } else if (modeType == MT_CALIBRATE_FLOW) {
     display.printf("Cd: %.3f", numberSelector.getValue());
@@ -1066,10 +1059,10 @@ static void displaySelectMode(ModeType mtype) {
   display.print("Measure Mode");
   if (mtype == MT_MEASURE) display.setTextColor(SH110X_WHITE, SH110X_BLACK);
 
-  if (mtype == MT_CALIBRATE_ZERO_COMPENSATION) display.setTextColor(SH110X_BLACK, SH110X_WHITE);
+  if (mtype == MT_TUNE_ZERO_COMPENSATION) display.setTextColor(SH110X_BLACK, SH110X_WHITE);
   display.setCursor(0, 19);
   display.print("Tune Zero Comp");
-  if (mtype == MT_CALIBRATE_ZERO_COMPENSATION) display.setTextColor(SH110X_WHITE, SH110X_BLACK);
+  if (mtype == MT_TUNE_ZERO_COMPENSATION) display.setTextColor(SH110X_WHITE, SH110X_BLACK);
   
   if (mtype == MT_CALIBRATE_FLOW) display.setTextColor(SH110X_BLACK, SH110X_WHITE);
   display.setCursor(0, 28);
