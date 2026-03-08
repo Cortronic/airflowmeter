@@ -16,7 +16,7 @@
 #include "main.h"
 
 const float Csupply = 0.90;
-const float Creturn = 1.03;
+const float Cextract = 1.03;
 const float flowFactor = 260.28;
 
 // Pin definitions
@@ -106,8 +106,8 @@ float compensationFactorER = 0.0;
 float compensationFactorSA = 0.0;
 float compensationFactorSR = 0.0;
 
+float flowFactorExtract = Cextract * flowFactor;
 float flowFactorSupply = Csupply * flowFactor;
-float flowFactorReturn = Creturn * flowFactor;
 
 static void  initDisplay(void);
 static void  displayTextNumber(const char *txt, float);
@@ -214,7 +214,7 @@ void loadPreferences() {
   preferences.begin("airflow", true);
   float temp = preferences.getFloat("coefReturn", 0.0);
   if (temp >= 0.8 && temp <= 1.2)
-    flowFactorReturn = flowFactor * temp;
+    flowFactorExtract = flowFactor * temp;
   temp = preferences.getFloat("coefSupply", 0.0);
   if (temp >= 0.8 && temp <= 1.2)
     flowFactorSupply = flowFactor * temp;
@@ -627,7 +627,7 @@ void loopRotaryEncoder() {
         switch (valveType) {
           case VT_EXTRACT_AXIAL:
           case VT_EXTRACT_RADIAL:
-            flowFactorReturn = flowFactor * numberSelector.getValue();
+            flowFactorExtract = flowFactor * numberSelector.getValue();
             break;
           case VT_SUPPLY_AXIAL:
           case VT_SUPPLY_RADIAL:
@@ -943,7 +943,7 @@ static void displayCoefficientFlow() {
 }
 //////////////////////////////////////////////////////////////////////////
 
-static const char* getHoodValveText(ValveType type) {
+static const char* getValveTypeText(ValveType type) {
 
   switch (type) {
     case VT_EXTRACT_AXIAL:
@@ -998,12 +998,12 @@ static void displayMeasurements() {
     display.printf("Kd: %.2f", numberSelector.getValue());     
   } else {
     // display setpoint zero pressure
-    display.printf("Sp %.1f Pa", pidSetpoint);
+    display.printf("Sz: %.1fPa", pidSetpoint);
   }
   readPressureSensors();
 
   // display current hood valve type
-  printAlignRight(getHoodValveText(valveType), 127, 0);
+  printAlignRight(getValveTypeText(valveType), 127, 0);
   readPressureSensors();
 
   // display flow
@@ -1021,7 +1021,7 @@ static void displayMeasurements() {
 
   // display zero pressure
   display.setCursor(0, 41);
-  display.printf("Pz %.1f Pa", zeroPressure.get());
+  display.printf("Pz %.1fPa", zeroPressure.get());
   readPressureSensors();
 
   // display temperature
@@ -1149,12 +1149,12 @@ static void  displaySelectValveMode(ValveType type) {
   * 
 */
 
-static float getHoodValveCoefficient() {
+static float getValveCoefficient() {
 
   switch (valveType) {
     case VT_EXTRACT_AXIAL:
     case VT_EXTRACT_RADIAL:
-      return flowFactorReturn;
+      return flowFactorExtract;
     case VT_SUPPLY_AXIAL:
     case VT_SUPPLY_RADIAL:
       return flowFactorSupply;
@@ -1167,7 +1167,7 @@ static float calculateFlowCompensated(float dP) {
   float Pa = pressureAmbient.get() * 100.0;
   float Ta = temperatureAmbient.get() + 273.15;
   //float C = direction ? flowFactorSupply : flowFactorReturn;
-  float C = getHoodValveCoefficient();
+  float C = getValveCoefficient();
 
   return dP > 0.0 ? C * sqrt(dP * Ta / Pa) : 0.0; // (m³/h)
 }
