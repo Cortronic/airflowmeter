@@ -106,8 +106,10 @@ float compensationFactorER = 0.0;
 float compensationFactorSA = 0.0;
 float compensationFactorSR = 0.0;
 
-float flowFactorExtract = Cextract * flowFactor;
-float flowFactorSupply = Csupply * flowFactor;
+float flowFactorExtractAxial  = Cextract * flowFactor;
+float flowFactorExtractRadial = Cextract * flowFactor;
+float flowFactorSupplyAxial   = Csupply * flowFactor;
+float flowFactorSupplyRadial  = Csupply * flowFactor;
 
 static void  initDisplay(void);
 static void  displayTextNumber(const char *txt, float);
@@ -212,12 +214,23 @@ void saveFloat(const char* key, float value) {
 
 void loadPreferences() {
   preferences.begin("airflow", true);
-  float temp = preferences.getFloat("coefReturn", 0.0);
-  if (temp >= 0.8 && temp <= 1.2)
-    flowFactorExtract = flowFactor * temp;
-  temp = preferences.getFloat("coefSupply", 0.0);
-  if (temp >= 0.8 && temp <= 1.2)
-    flowFactorSupply = flowFactor * temp;
+
+  float temp = preferences.getFloat("coefExtractAx", 0.0);
+  if (temp >= 0.8 && temp <= 1.2) {
+    flowFactorExtractAxial = flowFactor * temp;
+  }
+  temp = preferences.getFloat("coefExtractRd", 0.0);
+  if (temp >= 0.8 && temp <= 1.2) {
+    flowFactorExtractRadial = flowFactor * temp;
+  }
+  temp = preferences.getFloat("coefSupplyAx", 0.0);
+  if (temp >= 0.8 && temp <= 1.2) {
+    flowFactorSupplyAxial = flowFactor * temp;
+  }
+  temp = preferences.getFloat("coefSupplyRd", 0.0);
+  if (temp >= 0.8 && temp <= 1.2) {
+    flowFactorSupplyRadial = flowFactor * temp;
+  }
   compensationFactorEA = preferences.getFloat("compFactRA", 0.0);
   compensationFactorER = preferences.getFloat("compFactRB", 0.0);
   compensationFactorSA = preferences.getFloat("compFactSA", 0.0);
@@ -497,12 +510,16 @@ void on_button_short_click() {
       modeType = MT_MEASURE;
       switch (valveType) {
         case VT_EXTRACT_AXIAL:
+          saveFloat("coefExtractnAx", numberSelector.getValue());
+          break;
         case VT_EXTRACT_RADIAL:
-          saveFloat("coefReturn", numberSelector.getValue());
+          saveFloat("coefExtractRd", numberSelector.getValue());
           break;
         case VT_SUPPLY_AXIAL:
+            saveFloat("coefSupplyAx", numberSelector.getValue());
+            break;
         case VT_SUPPLY_RADIAL:
-          saveFloat("coefSupply", numberSelector.getValue());
+          saveFloat("coefSupplyRd", numberSelector.getValue());
           break;
       }
       break;
@@ -626,12 +643,16 @@ void loopRotaryEncoder() {
       case MT_CALIBRATE_FLOW:
         switch (valveType) {
           case VT_EXTRACT_AXIAL:
+            flowFactorExtractAxial = flowFactor * numberSelector.getValue();
+            break;
           case VT_EXTRACT_RADIAL:
-            flowFactorExtract = flowFactor * numberSelector.getValue();
+            flowFactorExtractRadial = flowFactor * numberSelector.getValue();
             break;
           case VT_SUPPLY_AXIAL:
+            flowFactorSupplyAxial = flowFactor * numberSelector.getValue();
+            break;
           case VT_SUPPLY_RADIAL:
-            flowFactorSupply = flowFactor * numberSelector.getValue();
+            flowFactorSupplyRadial = flowFactor * numberSelector.getValue();
             break;
         }
         displayCoefficientFlow();
@@ -1153,11 +1174,13 @@ static float getValveCoefficient() {
 
   switch (valveType) {
     case VT_EXTRACT_AXIAL:
+      return flowFactorExtractAxial;
     case VT_EXTRACT_RADIAL:
-      return flowFactorExtract;
+      return flowFactorExtractRadial;
     case VT_SUPPLY_AXIAL:
+      return flowFactorSupplyAxial;
     case VT_SUPPLY_RADIAL:
-      return flowFactorSupply;
+      return flowFactorSupplyRadial;
   }
   return 0.0;
 }
