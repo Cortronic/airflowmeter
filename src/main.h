@@ -6,6 +6,7 @@ typedef enum {
   MT_TUNE_ZERO_COMPENSATION = 3,
   MT_CALIBRATE_FLOW = 4,
   MT_TUNE_PID = 5,
+  MT_ADJUST_OFFSET = 6,
 } ModeType;
 extern ModeType modeType;
 

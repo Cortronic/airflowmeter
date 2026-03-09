@@ -112,6 +112,8 @@ float flowFactorSupplyAxial   = Csupply * flowFactor;
 float flowFactorSupplyRadial  = Csupply * flowFactor;
 
 static void  initDisplay(void);
+static void  displayAdjustSensorOffsetsProgress(int16_t progress);
+static void  displayAdjustSensorOffsets(const char *sensor);
 static void  displayTextNumber(const char *txt, float);
 static void  displayMeasurements();
 static void  displaySelectMode(ModeType type);
@@ -215,6 +217,9 @@ void saveFloat(const char* key, float value) {
 void loadPreferences() {
   preferences.begin("airflow", true);
 
+  offsetZeroPressure = preferences.getFloat("offsetZero", 0.0);
+  offsetFlowPressure = preferences.getFloat("offsetFlow", 0.0);
+
   float temp = preferences.getFloat("coefExtractAx", 0.0);
   if (temp >= 0.8 && temp <= 1.2) {
     flowFactorExtractAxial = flowFactor * temp;
@@ -236,6 +241,62 @@ void loadPreferences() {
   compensationFactorSA = preferences.getFloat("compFactSA", 0.0);
   compensationFactorSR = preferences.getFloat("compFactSB", 0.0);
   preferences.end();
+}
+//////////////////////////////////////////////////////////////////////////
+
+void adjustSensorOffsetFlowPressure() {
+  Serial.println("Adjusting offset flowsensor."); 
+  for (size_t i = 0; i < 200; i++) {
+    float differentialPressure;
+    float temperature;
+    uint16_t error = sdpFlow.readMeasurement(differentialPressure, temperature);
+    if (error) {
+       Serial.print("Error trying to execute readMeasurement() from flowsensor");
+       break;
+    }
+    calibration.add(differentialPressure);
+    if (i % 12 == 0) {
+      displayAdjustSensorOffsetsProgress(i * 120 / 200);
+    }
+    delay(15);
+  }
+
+  offsetFlowPressure = calibration.get();
+  saveFloat("offsetFlow", offsetFlowPressure);
+  Serial.printf("offset flow %f\n", offsetFlowPressure);
+  delay(500); 
+}
+//////////////////////////////////////////////////////////////////////////
+
+void adjustSensorOffsetZeroPressure() {
+  Serial.println("Adjusting offset zeropressuresensor."); 
+  for (size_t i = 0; i < 200; i++) {
+    float differentialPressure;
+    float temperature;
+    uint16_t error = sdpZero.readMeasurement(differentialPressure, temperature);
+    if (error) {
+       Serial.print("Error trying to execute readMeasurement() from zeropressuresensor");
+       break;
+    }
+    calibration.add(differentialPressure);
+    if (i % 12 == 0) {
+      displayAdjustSensorOffsetsProgress(i * 120 / 200);
+    }
+    delay(15);
+  }
+  
+  offsetZeroPressure = calibration.get();
+  saveFloat("offsetZero", offsetZeroPressure);
+  Serial.printf("offset zero %f\n", offsetZeroPressure);
+  delay(500); 
+}
+//////////////////////////////////////////////////////////////////////////
+
+void adjustSensorOffsets() {
+  displayAdjustSensorOffsets("Zero");
+  adjustSensorOffsetZeroPressure();
+  displayAdjustSensorOffsets("Flow");
+  adjustSensorOffsetFlowPressure();
 }
 //////////////////////////////////////////////////////////////////////////
 
@@ -285,40 +346,6 @@ void setup() {
   humidityAmbient.begin(SMOOTHED_AVERAGE, 40);
   temperatureAmbient.begin(SMOOTHED_AVERAGE, 40);
   delay(500);
-
-  //
-  Serial.println("Getting offset flowsensor."); 
-  for (size_t i = 0; i < 200; i++) {
-    float differentialPressure;
-    float temperature;
-    uint16_t error = sdpFlow.readMeasurement(differentialPressure, temperature);
-    if (error) {
-       Serial.print("Error trying to execute readMeasurement() from flowsensor");
-       break;
-    }
-    calibration.add(differentialPressure);
-    delay(10);
-  }
-  delay(500);
-  offsetFlowPressure = calibration.get();
-  Serial.printf("offset flow %.1f\n", offsetFlowPressure);
-
-  //
-  Serial.println("Getting  offset zeropressure."); 
-  for (size_t i = 0; i < 200; i++) {
-    float differentialPressure;
-    float temperature;
-    uint16_t error = sdpZero.readMeasurement(differentialPressure, temperature);
-    if (error) {
-       Serial.print("Error trying to execute readMeasurement() from zeropresuresensor");
-       break;
-    }
-    calibration.add(differentialPressure);
-    delay(10);
-  }
-  delay(500);
-  offsetZeroPressure = calibration.get();
-  Serial.printf("offset zero %.1f\n", offsetZeroPressure);
 
   // initialize the PID variables
   Kp = getFloat("Kp", Kp);
@@ -429,12 +456,12 @@ float calculateZeroCompensationPressure() {
 
 void initNextMode(ModeType type) {
 
-   modeType = type;
+  modeType = type;
 
   switch (type) {
     
     case MT_SELECT:
-      numberSelector.setRange(1, 5,  1, true, 0);
+      numberSelector.setRange(1, 6,  1, true, 0);
       numberSelector.setValue(MT_SELECT_VALVE);
       displaySelectMode(MT_SELECT_VALVE);
       break;
@@ -466,13 +493,19 @@ void initNextMode(ModeType type) {
           numberSelector.setValue(getFloat("coefSupply", 1.0));
           break;
       }
-     break;
+      break;
 
-     case MT_TUNE_PID:
+    case MT_TUNE_PID:
       pidTuneType = PID_TUNE_NONE;
       numberSelector.setRange(0, 3, 1, true, 0);
       numberSelector.setValue(PID_TUNE_NONE);
       displaySelectTunePID(PID_TUNE_NONE);
+      break;
+
+    case MT_ADJUST_OFFSET:
+      adjustSensorOffsets();
+      modeType = MT_MEASURE;
+      displayMeasurements();
       break;
   }
 }
@@ -994,6 +1027,26 @@ static void displayTextNumber(const char *txt, float number) {
 }
 //////////////////////////////////////////////////////////////////////////
 
+static void displayAdjustSensorOffsets(const char *sensor) {
+  display.clearDisplay();
+  readPressureSensors();
+  display.setTextSize(1);
+  display.setCursor(0, 28);
+  display.printf("Offset %s...", sensor);
+  readPressureSensors();
+  display.display();
+  readPressureSensors();
+}
+//////////////////////////////////////////////////////////////////////////
+
+static void displayAdjustSensorOffsetsProgress(int16_t progress) {
+  display.fillRect(0, 40, progress, 10, SH110X_WHITE);
+  readPressureSensors();
+  display.display();
+  readPressureSensors();
+}
+//////////////////////////////////////////////////////////////////////////
+
 static void displayMeasurements() {
   char message[32];
   
@@ -1095,8 +1148,12 @@ static void displaySelectMode(ModeType mtype) {
   display.print("Tune PID");
   if (mtype == MT_TUNE_PID) display.setTextColor(SH110X_WHITE, SH110X_BLACK);
 
-  display.display();
+  if (mtype == MT_ADJUST_OFFSET) display.setTextColor(SH110X_BLACK, SH110X_WHITE);
+  display.setCursor(0, 46);
+  display.print("Adjust Offset");
+  if (mtype == MT_ADJUST_OFFSET) display.setTextColor(SH110X_WHITE, SH110X_BLACK);
 
+  display.display();
 }
 //////////////////////////////////////////////////////////////////////////
 
