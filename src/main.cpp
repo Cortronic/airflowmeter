@@ -119,7 +119,7 @@ static void  displayMeasurements();
 static void  displaySelectMode(ModeType type);
 static void  displaySelectTunePID(PidTuneType type);
 static void  displaySelectValveMode(ValveType type);
-static void  displayCoefficientFlow();
+static void  displayCoefficientFlow(float coef);
 static void  displayCoefficientZeroCompensation();
 static void  initBME280();
 static void  initSDP(SensirionI2CSdp&, TwoWire&);
@@ -240,6 +240,12 @@ void loadPreferences() {
   compensationFactorER = preferences.getFloat(ZERO_COMPENSATION_FACTOR_ER, 0.0);
   compensationFactorSA = preferences.getFloat(ZERO_COMPENSATION_FACTOR_SA, 0.0);
   compensationFactorSR = preferences.getFloat(ZERO_COMPENSATION_FACTOR_SR, 0.0);
+
+  // initialize the PID variables
+  Kp = getFloat(Kp_KEY, Kp);
+  Ki = getFloat(Ki_KEY, Ki );
+  Kd = getFloat(Kd_KEY, Kd);
+
   preferences.end();
 }
 //////////////////////////////////////////////////////////////////////////
@@ -347,10 +353,6 @@ void setup() {
   temperatureAmbient.begin(SMOOTHED_AVERAGE, 40);
   delay(500);
 
-  // initialize the PID variables
-  Kp = getFloat("Kp", Kp);
-  Ki = getFloat("Ki", Ki );
-  Kd = getFloat("Kd", Kd);
   pidSetpoint = 0.0;
   pidInput = 0.0;
 
@@ -496,6 +498,7 @@ void initNextMode(ModeType type) {
       break;
 
     case MT_MEASURE:
+      displayMeasurements();
       break; 
 
     case MT_TUNE_ZERO_COMPENSATION:
@@ -508,14 +511,19 @@ void initNextMode(ModeType type) {
       numberSelector.setRange(0.8, 1.2, 0.001, false, 3);
       switch (valveType) {
         case VT_EXTRACT_AXIAL:
+          numberSelector.setValue(getFloat(COEF_EXTRACT_AXIAL, 1.0));
+          break;
         case VT_EXTRACT_RADIAL:
-          numberSelector.setValue(getFloat("coefReturn", 1.0));
+          numberSelector.setValue(getFloat(COEF_EXTRACT_RADIAL, 1.0));
           break;
         case VT_SUPPLY_AXIAL:
+          numberSelector.setValue(getFloat(COEF_SUPPLY_AXIAL, 1.0));
+          break;
         case VT_SUPPLY_RADIAL:
-          numberSelector.setValue(getFloat("coefSupply", 1.0));
+          numberSelector.setValue(getFloat(COEF_SUPPLY_RADIAL, 1.0));
           break;
       }
+      displayCoefficientFlow(numberSelector.getValue());
       break;
 
     case MT_TUNE_PID:
@@ -539,10 +547,7 @@ void on_button_short_click() {
   switch (modeType) {
     
     case MT_MEASURE:
-      modeType = MT_SELECT_VALVE;
-      numberSelector.setRange(0, 3,  1, true, 0);
-      numberSelector.setValue(valveType);
-      displaySelectValveMode(valveType);
+      initNextMode(MT_SELECT_VALVE);
       break;
 
     case MT_SELECT:
@@ -550,20 +555,18 @@ void on_button_short_click() {
       break;
 
     case MT_SELECT_VALVE:
-      modeType = MT_MEASURE;
       setValveType((ValveType)(uint8_t)numberSelector.getValue());
-      displayMeasurements();
+      initNextMode(MT_MEASURE);
       break;
 
     case MT_TUNE_ZERO_COMPENSATION:
-      modeType = MT_MEASURE;
       saveZeroCompensationFactor(numberSelector.getValue());
-      displayMeasurements();
+      initNextMode(MT_MEASURE);
       break;
 
     case MT_CALIBRATE_FLOW:
-      modeType = MT_MEASURE;
       saveDischargeCoefficient(numberSelector.getValue());
+      initNextMode(MT_MEASURE);
       break;
 
     case MT_TUNE_PID:
@@ -595,17 +598,17 @@ void on_button_short_click() {
           break;
 
         case PID_TUNE_P:
-          saveFloat("Kp", numberSelector.getValue());
+          saveFloat(Kp_KEY, numberSelector.getValue());
           initNextMode(MT_TUNE_PID);
           break;
 
         case PID_TUNE_I:
-          saveFloat("Ki", numberSelector.getValue());
+          saveFloat(Ki_KEY, numberSelector.getValue());
           initNextMode(MT_TUNE_PID);
           break;
           
         case PID_TUNE_D:
-          saveFloat("Kd", numberSelector.getValue());
+          saveFloat(Kd_KEY, numberSelector.getValue());
           initNextMode(MT_TUNE_PID);
           break; 
       }
@@ -697,7 +700,7 @@ void loopRotaryEncoder() {
             flowFactorSupplyRadial = flowFactor * numberSelector.getValue();
             break;
         }
-        displayCoefficientFlow();
+        displayCoefficientFlow(numberSelector.getValue());
         break;
 
       case MT_TUNE_PID:
@@ -996,11 +999,11 @@ static void displayCoefficientZeroCompensation() {
 }
 //////////////////////////////////////////////////////////////////////////
 
-static void displayCoefficientFlow() {
+static void displayCoefficientFlow(float coef) {
   // display setpoint zero pressure
   display.setTextSize(1);
   display.setCursor(0, 0);
-  display.printf("Cd: %.3f", numberSelector.getValue());
+  display.printf("Cd: %.3f", coef);
   readPressureSensors();
   display.display();
   readPressureSensors();
@@ -1041,6 +1044,8 @@ static void displayAdjustSensorOffsets(const char *sensor) {
   display.clearDisplay();
   readPressureSensors();
   display.setTextSize(1);
+  printAlignCenter("Adjusting Offsets", 64, 0);
+  readPressureSensors();
   display.setCursor(0, 28);
   display.printf("Offset %s...", sensor);
   readPressureSensors();

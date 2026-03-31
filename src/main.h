@@ -41,3 +41,6 @@ extern PidTuneType pidTuneType;
 #define ZERO_COMPENSATION_FACTOR_ER "compFactER"
 #define ZERO_COMPENSATION_FACTOR_SA "compFactSA"
 #define ZERO_COMPENSATION_FACTOR_SR "compFactSR"
+#define Kp_KEY "Kp"
+#define Ki_KEY "Ki"
+#define Kd_KEY "Kd"
