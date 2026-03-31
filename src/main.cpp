@@ -65,7 +65,7 @@ Smoothed<float> humidityAmbient;
 
 /**
  * Two hardware I2C busses, one for the display, the BME280 and one SPD810 sensor.
- * The other for the second SDP810 sensor, to avoid interference between the two sensors.
+ * The other for the second SDP810 sensor, to avoid address conflict between the two sensors.
  * The display and BME280 are on the same bus as they are not time critical and can handle the occasional delay 
  * and do not interfere with the timing of the SDP810 sensors.
  */
@@ -217,29 +217,29 @@ void saveFloat(const char* key, float value) {
 void loadPreferences() {
   preferences.begin("airflow", true);
 
-  offsetZeroPressure = preferences.getFloat("offsetZero", 0.0);
-  offsetFlowPressure = preferences.getFloat("offsetFlow", 0.0);
+  offsetZeroPressure = preferences.getFloat(OFFSET_ZERO_PRESSURE, 0.0);
+  offsetFlowPressure = preferences.getFloat(OFFSET_FLOW_PRESSURE, 0.0);
 
-  float temp = preferences.getFloat("coefExtractAx", 0.0);
+  float temp = preferences.getFloat(COEF_EXTRACT_AXIAL, 0.0);
   if (temp >= 0.8 && temp <= 1.2) {
     flowFactorExtractAxial = flowFactor * temp;
   }
-  temp = preferences.getFloat("coefExtractRd", 0.0);
+  temp = preferences.getFloat(COEF_EXTRACT_RADIAL, 0.0);
   if (temp >= 0.8 && temp <= 1.2) {
     flowFactorExtractRadial = flowFactor * temp;
   }
-  temp = preferences.getFloat("coefSupplyAx", 0.0);
+  temp = preferences.getFloat(COEF_SUPPLY_AXIAL, 0.0);
   if (temp >= 0.8 && temp <= 1.2) {
     flowFactorSupplyAxial = flowFactor * temp;
   }
-  temp = preferences.getFloat("coefSupplyRd", 0.0);
+  temp = preferences.getFloat(COEF_SUPPLY_RADIAL, 0.0);
   if (temp >= 0.8 && temp <= 1.2) {
     flowFactorSupplyRadial = flowFactor * temp;
   }
-  compensationFactorEA = preferences.getFloat("compFactRA", 0.0);
-  compensationFactorER = preferences.getFloat("compFactRB", 0.0);
-  compensationFactorSA = preferences.getFloat("compFactSA", 0.0);
-  compensationFactorSR = preferences.getFloat("compFactSB", 0.0);
+  compensationFactorEA = preferences.getFloat(ZERO_COMPENSATION_FACTOR_EA, 0.0);
+  compensationFactorER = preferences.getFloat(ZERO_COMPENSATION_FACTOR_ER, 0.0);
+  compensationFactorSA = preferences.getFloat(ZERO_COMPENSATION_FACTOR_SA, 0.0);
+  compensationFactorSR = preferences.getFloat(ZERO_COMPENSATION_FACTOR_SR, 0.0);
   preferences.end();
 }
 //////////////////////////////////////////////////////////////////////////
@@ -262,7 +262,7 @@ void adjustSensorOffsetFlowPressure() {
   }
 
   offsetFlowPressure = calibration.get();
-  saveFloat("offsetFlow", offsetFlowPressure);
+  saveFloat(OFFSET_FLOW_PRESSURE, offsetFlowPressure);
   Serial.printf("offset flow %f\n", offsetFlowPressure);
   delay(500); 
 }
@@ -286,7 +286,7 @@ void adjustSensorOffsetZeroPressure() {
   }
   
   offsetZeroPressure = calibration.get();
-  saveFloat("offsetZero", offsetZeroPressure);
+  saveFloat(OFFSET_ZERO_PRESSURE, offsetZeroPressure);
   Serial.printf("offset zero %f\n", offsetZeroPressure);
   delay(500); 
 }
@@ -339,7 +339,7 @@ void setup() {
 
   Serial.println("setup smoothed average.");
   zeroPressure.begin(SMOOTHED_EXPONENTIAL, 2);
-  flow.begin(SMOOTHED_AVERAGE, 50);
+  flow.begin(SMOOTHED_EXPONENTIAL, 2);
   flowPressure.begin(SMOOTHED_AVERAGE, 100);
   calibration.begin(SMOOTHED_AVERAGE, 200);
   pressureAmbient.begin(SMOOTHED_AVERAGE, 40);
@@ -409,19 +409,19 @@ void saveDischargeCoefficient(float coef) {
   switch (valveType) {
     case VT_EXTRACT_AXIAL:
       flowFactorExtractAxial = flowFactor * coef;
-      saveFloat("coefExtractAx", coef);
+      saveFloat(COEF_EXTRACT_AXIAL, coef);
       break;
     case VT_EXTRACT_RADIAL:
       flowFactorExtractRadial = flowFactor * coef;
-      saveFloat("coefExtractRd", coef);
+      saveFloat(COEF_EXTRACT_RADIAL, coef);
       break;
     case VT_SUPPLY_AXIAL:
       flowFactorSupplyAxial = flowFactor * coef;
-      saveFloat("coefSupplyAx", coef);
+      saveFloat(COEF_SUPPLY_AXIAL, coef);
       break;
     case VT_SUPPLY_RADIAL:
       flowFactorSupplyRadial = flowFactor * coef; 
-      saveFloat("coefSupplyRd", coef);
+      saveFloat(COEF_SUPPLY_RADIAL, coef);
       break;
   }
 }
@@ -432,19 +432,19 @@ void saveZeroCompensationFactor(float factor) {
   switch (valveType) {
     case VT_EXTRACT_AXIAL:
       compensationFactorEA = factor;
-      saveFloat("compFactRA", compensationFactorEA);
+      saveFloat(ZERO_COMPENSATION_FACTOR_EA, factor);
       break;
     case VT_EXTRACT_RADIAL:
       compensationFactorER = factor;
-      saveFloat("compFactRB", compensationFactorER);
+      saveFloat(ZERO_COMPENSATION_FACTOR_ER, factor);
       break;
     case VT_SUPPLY_AXIAL:
       compensationFactorSA = factor;
-      saveFloat("compFactSA", compensationFactorSA);
+      saveFloat(ZERO_COMPENSATION_FACTOR_SA, factor);
       break;
     case VT_SUPPLY_RADIAL:
       compensationFactorSR = factor; 
-      saveFloat("compFactSB", compensationFactorSR);
+      saveFloat(ZERO_COMPENSATION_FACTOR_SR, factor);
       break;
   }
 }
@@ -453,19 +453,19 @@ void saveZeroCompensationFactor(float factor) {
 void restoreZeroCompensationFactors() {
   switch(valveType) {
     case VT_EXTRACT_AXIAL:
-      compensationFactorEA = getFloat("compFactRA", 0.0);
+      compensationFactorEA = getFloat(ZERO_COMPENSATION_FACTOR_EA, 0.0);
       pidSetpoint = compensationFactorEA * flowPressure.get();
       break;
     case VT_EXTRACT_RADIAL:
-      compensationFactorER = getFloat("compFactRB", 0.0);
+      compensationFactorER = getFloat(ZERO_COMPENSATION_FACTOR_ER, 0.0);
       pidSetpoint = compensationFactorER * flowPressure.get();
       break;
     case VT_SUPPLY_AXIAL:
-      compensationFactorSA = getFloat("compFactSA", 0.0);
+      compensationFactorSA = getFloat(ZERO_COMPENSATION_FACTOR_SA, 0.0);
       pidSetpoint = compensationFactorSA * flowPressure.get();
       break;
     case VT_SUPPLY_RADIAL:
-      compensationFactorSR = getFloat("compFactSB", 0.0); 
+      compensationFactorSR = getFloat(ZERO_COMPENSATION_FACTOR_SR, 0.0); 
       pidSetpoint = compensationFactorSR * flowPressure.get();
       break;
   }

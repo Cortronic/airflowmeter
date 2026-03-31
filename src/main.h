@@ -29,3 +29,15 @@ extern PidTuneType pidTuneType;
 #define ZERO_COMP_MIN -0.5
 #define ZERO_COMP_MAX 0.5
 #define ZERO_COMP_STEP 0.001
+
+// preferences keys
+#define OFFSET_ZERO_PRESSURE "offsetZero"
+#define OFFSET_FLOW_PRESSURE "offsetFlow"
+#define COEF_EXTRACT_AXIAL "coefExtractAx"
+#define COEF_EXTRACT_RADIAL "coefExtractRd"
+#define COEF_SUPPLY_AXIAL "coefSupplyAx"
+#define COEF_SUPPLY_RADIAL "coefSupplyRd"
+#define ZERO_COMPENSATION_FACTOR_EA "compFactEA"
+#define ZERO_COMPENSATION_FACTOR_ER "compFactER"
+#define ZERO_COMPENSATION_FACTOR_SA "compFactSA"
+#define ZERO_COMPENSATION_FACTOR_SR "compFactSR"
