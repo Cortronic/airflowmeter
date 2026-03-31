@@ -338,7 +338,7 @@ void setup() {
   delay(500);
 
   Serial.println("setup smoothed average.");
-  zeroPressure.begin(SMOOTHED_AVERAGE, 10);
+  zeroPressure.begin(SMOOTHED_EXPONENTIAL, 2);
   flow.begin(SMOOTHED_AVERAGE, 50);
   flowPressure.begin(SMOOTHED_AVERAGE, 100);
   calibration.begin(SMOOTHED_AVERAGE, 200);
@@ -405,7 +405,30 @@ void setZeroCompensationFactor(float factor) {
 }
 //////////////////////////////////////////////////////////////////////////
 
+void saveDischargeCoefficient(float coef) {
+  switch (valveType) {
+    case VT_EXTRACT_AXIAL:
+      flowFactorExtractAxial = flowFactor * coef;
+      saveFloat("coefExtractAx", coef);
+      break;
+    case VT_EXTRACT_RADIAL:
+      flowFactorExtractRadial = flowFactor * coef;
+      saveFloat("coefExtractRd", coef);
+      break;
+    case VT_SUPPLY_AXIAL:
+      flowFactorSupplyAxial = flowFactor * coef;
+      saveFloat("coefSupplyAx", coef);
+      break;
+    case VT_SUPPLY_RADIAL:
+      flowFactorSupplyRadial = flowFactor * coef; 
+      saveFloat("coefSupplyRd", coef);
+      break;
+  }
+}
+//////////////////////////////////////////////////////////////////////////
+
 void saveZeroCompensationFactor(float factor) {
+  
   switch (valveType) {
     case VT_EXTRACT_AXIAL:
       compensationFactorEA = factor;
@@ -512,8 +535,7 @@ void initNextMode(ModeType type) {
 //////////////////////////////////////////////////////////////////////////
 
 void on_button_short_click() {
-  // pidSetpoint = compensationFactorB = numberSelector.getValue();
-  // compensationFactorA = flow.get();
+ 
   switch (modeType) {
     
     case MT_MEASURE:
@@ -541,20 +563,7 @@ void on_button_short_click() {
 
     case MT_CALIBRATE_FLOW:
       modeType = MT_MEASURE;
-      switch (valveType) {
-        case VT_EXTRACT_AXIAL:
-          saveFloat("coefExtractnAx", numberSelector.getValue());
-          break;
-        case VT_EXTRACT_RADIAL:
-          saveFloat("coefExtractRd", numberSelector.getValue());
-          break;
-        case VT_SUPPLY_AXIAL:
-            saveFloat("coefSupplyAx", numberSelector.getValue());
-            break;
-        case VT_SUPPLY_RADIAL:
-          saveFloat("coefSupplyRd", numberSelector.getValue());
-          break;
-      }
+      saveDischargeCoefficient(numberSelector.getValue());
       break;
 
     case MT_TUNE_PID:
@@ -715,7 +724,8 @@ void loopRotaryEncoder() {
             pid.SetTunings(Kp, Ki, Kd);
             displayTextNumber("Kd: %.2f", Kd);
             break;
-        }    
+        }
+        break;    
     }
   } 
   handle_rotary_button();
