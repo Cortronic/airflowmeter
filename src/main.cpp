@@ -114,6 +114,12 @@ float flowFactorExtractRadial = venturi.dischargeCoefficient;
 float flowFactorSupplyAxial = venturi.dischargeCoefficient;
 float flowFactorSupplyRadial = venturi.dischargeCoefficient;
 
+static void  loadPreferences();
+static void  setupRotaryEncoder();
+static void  loopRotaryEncoder();
+static void  readPressureSensors();
+static float calculateZeroCompensationPressure();
+static void  setupTimer0();
 static void  initDisplay(void);
 static void  displayAdjustSensorOffsetsProgress(int16_t progress);
 static void  displayAdjustSensorOffsets(const char *sensor);
@@ -148,175 +154,6 @@ void IRAM_ATTR readButton_ISR() {
 }
 //////////////////////////////////////////////////////////////////////////
 
-void setupTimer0() {
-  // 1. Initialize timer
-  //timerBegin(timer_number, divider, countUp)
-  // Prescaler 80: 80MHz / 80 = 1MHz (1 microsecond per tick)
-  timer0 = timerBegin(0, 80, true);
-
-  // 2. Attach the ISR function
-  timerAttachInterrupt(timer0, &Timer0_ISR, true);
-
-  // 3. Set alarm to fire every 10000 ticks (10000 us = 10ms)
-  // timerAlarmWrite(timer, microseconds, autoreload)
-  timerAlarmWrite(timer0, 10000, true);
-
-  // 4. Enable the alarm
-  timerAlarmEnable(timer0);
-}
-//////////////////////////////////////////////////////////////////////////
-
-void setupRotaryEncoder() {
-  rotaryEncoder->begin();
-  rotaryEncoder->setup(&readEncoder_ISR, &readButton_ISR);
-  numberSelector.attachEncoder(rotaryEncoder);
-
-  // numberSelector.setRange parameters:
-  float minValue = -20.0;      // set minimum value for example -12.0
-  float maxValue = 20.0;       // set maxinum value for example 12.0
-  float step = 0.1;            // set step increment, default 1, can be smaller steps like 0.5 or 10
-  bool cycleValues = false;    // set true only if you want going to miminum value after maximum 
-  unsigned int decimals = 1;   // set precision - how many decimal places you want, default is 0
-  numberSelector.setRange(minValue, maxValue,  step, cycleValues, decimals);
-  numberSelector.setValue(0.0); // sets initial value
-}
-//////////////////////////////////////////////////////////////////////////
-
-void setValveType(ValveType type) {
-  valveType = type;
-  
-  switch(type) {
-    case VT_EXTRACT_AXIAL:
-    case VT_EXTRACT_RADIAL:
-      direction = false;
-      break;
-    
-    case VT_SUPPLY_AXIAL:  
-    case VT_SUPPLY_RADIAL:
-      direction = true;
-      break;
-  }
-  pid.SetControllerDirection(direction ? REVERSE : DIRECT);
-
-}
-//////////////////////////////////////////////////////////////////////////
-
-float getFloat(const char* key, float value = NAN) {
-  float f;
-  preferences.begin("airflow", false);
-  f = preferences.getFloat(key, value);
-  preferences.end();
-  return f == NAN ? 0.0 : f;
-}
-//////////////////////////////////////////////////////////////////////////
-
-void saveFloat(const char* key, float value) {
-  preferences.begin("airflow", false);
-  preferences.putFloat(key, value);
-  preferences.end();
-}
-//////////////////////////////////////////////////////////////////////////
-
-void loadPreferences() {
-  preferences.begin("airflow", true);
-
-  venturi.inletDiameter = preferences.getFloat(KEY_VENTURI_INLET_DIAMETER, venturi.inletDiameter);
-  venturi.throatDiameter = preferences.getFloat(KEY_VENTURI_THROAT_DIAMETER, venturi.inletDiameter * 0.75);
-  venturi.areaInlet = (float)M_PI * powf(venturi.inletDiameter / 2.0, 2.0);
-  venturi.areaThroat = (float)M_PI * powf(venturi.throatDiameter / 2.0, 2.0);
-  venturi.betaRatio = venturi.throatDiameter / venturi.inletDiameter;
-  venturi.betaCoefficient = 1.0 - powf(venturi.betaRatio, 4);
-  venturi.dischargeCoefficient = preferences.getFloat(KEY_VENTURI_CD, venturi.dischargeCoefficient);
-
-  offsetZeroPressure = preferences.getFloat(OFFSET_ZERO_PRESSURE, 0.0);
-  offsetFlowPressure = preferences.getFloat(OFFSET_FLOW_PRESSURE, 0.0);
-
-  float temp = preferences.getFloat(FLOW_COEF_EXTRACT_AXIAL, 0.0);
-  if (temp >= FLOW_COEF_MIN && temp <= FLOW_COEF_MAX) {
-    flowFactorExtractAxial = venturi.dischargeCoefficient * temp;
-  }
-  temp = preferences.getFloat(FLOW_COEF_EXTRACT_RADIAL, 0.0);
-  if (temp >= FLOW_COEF_MIN && temp <= FLOW_COEF_MAX) {
-    flowFactorExtractRadial = venturi.dischargeCoefficient * temp;
-  }
-  temp = preferences.getFloat(FLOW_COEF_SUPPLY_AXIAL, 0.0);
-  if (temp >= FLOW_COEF_MIN && temp <= FLOW_COEF_MAX) {
-    flowFactorSupplyAxial = venturi.dischargeCoefficient * temp;
-  }
-  temp = preferences.getFloat(FLOW_COEF_SUPPLY_RADIAL, 0.0);
-  if (temp >= FLOW_COEF_MIN && temp <= FLOW_COEF_MAX) {
-    flowFactorSupplyRadial = venturi.dischargeCoefficient * temp;
-  }
-  compensationFactorEA = preferences.getFloat(ZERO_COMPENSATION_FACTOR_EA, 0.0);
-  compensationFactorER = preferences.getFloat(ZERO_COMPENSATION_FACTOR_ER, 0.0);
-  compensationFactorSA = preferences.getFloat(ZERO_COMPENSATION_FACTOR_SA, 0.0);
-  compensationFactorSR = preferences.getFloat(ZERO_COMPENSATION_FACTOR_SR, 0.0);
-
-  // initialize the PID variables
-  Kp = preferences.getFloat(Kp_KEY, Kp);
-  Ki = preferences.getFloat(Ki_KEY, Ki);
-  Kd = preferences.getFloat(Kd_KEY, Kd);
-
-  preferences.end();
-}
-//////////////////////////////////////////////////////////////////////////
-
-void adjustSensorOffsetFlowPressure() {
-  Serial.println("Adjusting offset flowsensor."); 
-  for (size_t i = 0; i < 200; i++) {
-    float differentialPressure;
-    float temperature;
-    uint16_t error = sdpFlow.readMeasurement(differentialPressure, temperature);
-    if (error) {
-       Serial.print("Error trying to execute readMeasurement() from flowsensor");
-       break;
-    }
-    calibration.add(differentialPressure);
-    if (i % 12 == 0) {
-      displayAdjustSensorOffsetsProgress(i * 120 / 200);
-    }
-    delay(15);
-  }
-
-  offsetFlowPressure = calibration.get();
-  saveFloat(OFFSET_FLOW_PRESSURE, offsetFlowPressure);
-  Serial.printf("offset flow %f\n", offsetFlowPressure);
-  delay(500); 
-}
-//////////////////////////////////////////////////////////////////////////
-
-void adjustSensorOffsetZeroPressure() {
-  Serial.println("Adjusting offset zeropressuresensor."); 
-  for (size_t i = 0; i < 200; i++) {
-    float differentialPressure;
-    float temperature;
-    uint16_t error = sdpZero.readMeasurement(differentialPressure, temperature);
-    if (error) {
-       Serial.print("Error trying to execute readMeasurement() from zeropressuresensor");
-       break;
-    }
-    calibration.add(differentialPressure);
-    if (i % 12 == 0) {
-      displayAdjustSensorOffsetsProgress(i * 120 / 200);
-    }
-    delay(15);
-  }
-  
-  offsetZeroPressure = calibration.get();
-  saveFloat(OFFSET_ZERO_PRESSURE, offsetZeroPressure);
-  Serial.printf("offset zero %f\n", offsetZeroPressure);
-  delay(500); 
-}
-//////////////////////////////////////////////////////////////////////////
-
-void adjustSensorOffsets() {
-  displayAdjustSensorOffsets("Zero");
-  adjustSensorOffsetZeroPressure();
-  displayAdjustSensorOffsets("Flow");
-  adjustSensorOffsetFlowPressure();
-}
-//////////////////////////////////////////////////////////////////////////
-
 void setup() {
   Serial.begin(115200);
 
@@ -328,13 +165,9 @@ void setup() {
   setupRotaryEncoder();
 
   // Configure PWM
-  Serial.println("Setup PWM");
+  Serial.println("Setup PWM for fan control");
   fan.begin();
-  //ledcSetup(PWM_FAN_CHAN, PWM_FREQ, PWM_RESOLUTION);
-  //ledcAttachPin(PWM_FAN_PIN, PWM_FAN_CHAN);
-  //Set initial fan speed to zero
-  //ledcWrite(PWM_FAN_CHAN, 0);
-  delay(1000);
+  delay(500);
 
   // Start both busses
   I2C_A.begin(I2C_SDA0_PIN, I2C_SCL0_PIN, 700000);   // SDA, SCL
@@ -390,7 +223,243 @@ void setup() {
 }
 //////////////////////////////////////////////////////////////////////////
 
-float getZeroCompensationFactor() {
+void loop() {
+  static uint32_t loopcnt = 0;
+  static uint32_t loopCount = 0;
+  static uint32_t last_millis = 0;
+  uint32_t ms = millis();
+  
+  ++loopCount;
+  
+  readPressureSensors();
+
+  loopRotaryEncoder();
+
+  // every 100ms
+  if (ms >= last_millis + 100) {
+    last_millis = ms;
+
+    flow.add(getFlow(flowPressure.get(), temperatureAmbient.get(), pressureAmbient.get(), humidityAmbient.get()));
+    pidSetpoint = calculateZeroCompensationPressure(); 
+    pidInput = zeroPressure.get();
+    
+    pid.Compute();
+    // Apply PWM to fan
+    fan.setSpeed(pidOutput);
+
+    readPressureSensors();
+    
+    // every second
+    if (loopcnt % 10 == 0) {
+
+      // Only needed in forced mode! In normal mode, you can remove the next line.
+      bme280.takeForcedMeasurement(); // has no effect in normal mode
+      readPressureSensors();
+
+      // get the measurements from the BME280
+      pressureAmbient.add(bme280.readPressure()); // Pressure in Pa
+      readPressureSensors();
+      temperatureAmbient.add(bme280.readTemperature()); // Temperature in °C
+      readPressureSensors();
+      humidityAmbient.add(bme280.readHumidity()); // Humidity in %
+      readPressureSensors();
+
+      Serial.printf("delay: %u\n", millis() - ms);
+      Serial.printf("Loop count: %u\n", loopCount); // 168 loops/second
+      Serial.printf("Flow pressure: %.1f Pa\n", flowPressure.get());
+      Serial.printf("Zero presssure: %.1f Pa\n", zeroPressure.get());
+      Serial.printf("PWM fan dutycycle: %.1f%%\n", pidOutput/(((1 << PWM_RESOLUTION)-1) << PWM_DITHER_RESOLUTION) * 100);
+      loopCount = 0;
+      // 13ms
+      // Serial.printf("Loop duaration: %u\n", millis()- last_millis);
+    }
+    
+    // every 2 seconds
+    if (loopcnt++ % 20 == 0) {
+      if (modeType == MT_MEASURE 
+          || modeType == MT_TUNE_ZERO_COMPENSATION
+          || modeType == MT_CALIBRATE_FLOW
+          || pidTuneType == PID_TUNE_P
+          || pidTuneType == PID_TUNE_I
+          || pidTuneType == PID_TUNE_D
+        ) {
+        displayMeasurements(); // takes 42ms
+      }
+    }
+  }
+}
+//////////////////////////////////////////////////////////////////////////
+
+static void setupTimer0() {
+  // 1. Initialize timer
+  //timerBegin(timer_number, divider, countUp)
+  // Prescaler 80: 80MHz / 80 = 1MHz (1 microsecond per tick)
+  timer0 = timerBegin(0, 80, true);
+
+  // 2. Attach the ISR function
+  timerAttachInterrupt(timer0, &Timer0_ISR, true);
+
+  // 3. Set alarm to fire every 10000 ticks (10000 us = 10ms)
+  // timerAlarmWrite(timer, microseconds, autoreload)
+  timerAlarmWrite(timer0, 10000, true);
+
+  // 4. Enable the alarm
+  timerAlarmEnable(timer0);
+}
+//////////////////////////////////////////////////////////////////////////
+
+static void setupRotaryEncoder() {
+  rotaryEncoder->begin();
+  rotaryEncoder->setup(&readEncoder_ISR, &readButton_ISR);
+  numberSelector.attachEncoder(rotaryEncoder);
+
+  // numberSelector.setRange parameters:
+  float minValue = -20.0;      // set minimum value for example -12.0
+  float maxValue = 20.0;       // set maxinum value for example 12.0
+  float step = 0.1;            // set step increment, default 1, can be smaller steps like 0.5 or 10
+  bool cycleValues = false;    // set true only if you want going to miminum value after maximum 
+  unsigned int decimals = 1;   // set precision - how many decimal places you want, default is 0
+  numberSelector.setRange(minValue, maxValue,  step, cycleValues, decimals);
+  numberSelector.setValue(0.0); // sets initial value
+}
+//////////////////////////////////////////////////////////////////////////
+
+static void setValveType(ValveType type) {
+  valveType = type;
+  
+  switch(type) {
+    case VT_EXTRACT_AXIAL:
+    case VT_EXTRACT_RADIAL:
+      direction = false;
+      break;
+    
+    case VT_SUPPLY_AXIAL:  
+    case VT_SUPPLY_RADIAL:
+      direction = true;
+      break;
+  }
+  pid.SetControllerDirection(direction ? REVERSE : DIRECT);
+
+}
+//////////////////////////////////////////////////////////////////////////
+
+static float getFloat(const char* key, float value = NAN) {
+  float f;
+  preferences.begin("airflow", false);
+  f = preferences.getFloat(key, value);
+  preferences.end();
+  return f == NAN ? 0.0 : f;
+}
+//////////////////////////////////////////////////////////////////////////
+
+static void saveFloat(const char* key, float value) {
+  preferences.begin("airflow", false);
+  preferences.putFloat(key, value);
+  preferences.end();
+}
+//////////////////////////////////////////////////////////////////////////
+
+static void loadPreferences() {
+  preferences.begin("airflow", true);
+
+  venturi.inletDiameter = preferences.getFloat(KEY_VENTURI_INLET_DIAMETER, venturi.inletDiameter);
+  venturi.throatDiameter = preferences.getFloat(KEY_VENTURI_THROAT_DIAMETER, venturi.inletDiameter * 0.75);
+  venturi.areaInlet = (float)M_PI * powf(venturi.inletDiameter / 2.0, 2.0);
+  venturi.areaThroat = (float)M_PI * powf(venturi.throatDiameter / 2.0, 2.0);
+  venturi.betaRatio = venturi.throatDiameter / venturi.inletDiameter;
+  venturi.betaCoefficient = 1.0 - powf(venturi.betaRatio, 4);
+  venturi.dischargeCoefficient = preferences.getFloat(KEY_VENTURI_CD, venturi.dischargeCoefficient);
+
+  offsetZeroPressure = preferences.getFloat(OFFSET_ZERO_PRESSURE, 0.0);
+  offsetFlowPressure = preferences.getFloat(OFFSET_FLOW_PRESSURE, 0.0);
+
+  float temp = preferences.getFloat(FLOW_COEF_EXTRACT_AXIAL, 0.0);
+  if (temp >= FLOW_COEF_MIN && temp <= FLOW_COEF_MAX) {
+    flowFactorExtractAxial = venturi.dischargeCoefficient * temp;
+  }
+  temp = preferences.getFloat(FLOW_COEF_EXTRACT_RADIAL, 0.0);
+  if (temp >= FLOW_COEF_MIN && temp <= FLOW_COEF_MAX) {
+    flowFactorExtractRadial = venturi.dischargeCoefficient * temp;
+  }
+  temp = preferences.getFloat(FLOW_COEF_SUPPLY_AXIAL, 0.0);
+  if (temp >= FLOW_COEF_MIN && temp <= FLOW_COEF_MAX) {
+    flowFactorSupplyAxial = venturi.dischargeCoefficient * temp;
+  }
+  temp = preferences.getFloat(FLOW_COEF_SUPPLY_RADIAL, 0.0);
+  if (temp >= FLOW_COEF_MIN && temp <= FLOW_COEF_MAX) {
+    flowFactorSupplyRadial = venturi.dischargeCoefficient * temp;
+  }
+  compensationFactorEA = preferences.getFloat(ZERO_COMPENSATION_FACTOR_EA, 0.0);
+  compensationFactorER = preferences.getFloat(ZERO_COMPENSATION_FACTOR_ER, 0.0);
+  compensationFactorSA = preferences.getFloat(ZERO_COMPENSATION_FACTOR_SA, 0.0);
+  compensationFactorSR = preferences.getFloat(ZERO_COMPENSATION_FACTOR_SR, 0.0);
+
+  // initialize the PID variables
+  Kp = preferences.getFloat(Kp_KEY, Kp);
+  Ki = preferences.getFloat(Ki_KEY, Ki);
+  Kd = preferences.getFloat(Kd_KEY, Kd);
+
+  preferences.end();
+}
+//////////////////////////////////////////////////////////////////////////
+
+static void adjustSensorOffsetFlowPressure() {
+  Serial.println("Adjusting offset flowsensor."); 
+  for (size_t i = 0; i < 200; i++) {
+    float differentialPressure;
+    float temperature;
+    uint16_t error = sdpFlow.readMeasurement(differentialPressure, temperature);
+    if (error) {
+       Serial.print("Error trying to execute readMeasurement() from flowsensor");
+       break;
+    }
+    calibration.add(differentialPressure);
+    if (i % 12 == 0) {
+      displayAdjustSensorOffsetsProgress(i * 120 / 200);
+    }
+    delay(15);
+  }
+
+  offsetFlowPressure = calibration.get();
+  saveFloat(OFFSET_FLOW_PRESSURE, offsetFlowPressure);
+  Serial.printf("offset flow %f\n", offsetFlowPressure);
+  delay(500); 
+}
+//////////////////////////////////////////////////////////////////////////
+
+static void adjustSensorOffsetZeroPressure() {
+  Serial.println("Adjusting offset zeropressuresensor."); 
+  for (size_t i = 0; i < 200; i++) {
+    float differentialPressure;
+    float temperature;
+    uint16_t error = sdpZero.readMeasurement(differentialPressure, temperature);
+    if (error) {
+       Serial.print("Error trying to execute readMeasurement() from zeropressuresensor");
+       break;
+    }
+    calibration.add(differentialPressure);
+    if (i % 12 == 0) {
+      displayAdjustSensorOffsetsProgress(i * 120 / 200);
+    }
+    delay(15);
+  }
+  
+  offsetZeroPressure = calibration.get();
+  saveFloat(OFFSET_ZERO_PRESSURE, offsetZeroPressure);
+  Serial.printf("offset zero %f\n", offsetZeroPressure);
+  delay(500); 
+}
+//////////////////////////////////////////////////////////////////////////
+
+static void adjustSensorOffsets() {
+  displayAdjustSensorOffsets("Zero");
+  adjustSensorOffsetZeroPressure();
+  displayAdjustSensorOffsets("Flow");
+  adjustSensorOffsetFlowPressure();
+}
+//////////////////////////////////////////////////////////////////////////
+
+static float getZeroCompensationFactor() {
   switch (valveType) {
     case VT_EXTRACT_AXIAL:
       return compensationFactorEA;
@@ -405,7 +474,7 @@ float getZeroCompensationFactor() {
 }
 //////////////////////////////////////////////////////////////////////////
 
-void setZeroCompensationFactor(float factor) {
+static void setZeroCompensationFactor(float factor) {
   switch (valveType) {
     case VT_EXTRACT_AXIAL:
       compensationFactorEA = factor;
@@ -423,7 +492,7 @@ void setZeroCompensationFactor(float factor) {
 }
 //////////////////////////////////////////////////////////////////////////
 
-void saveDischargeCoefficient(float coef) {
+static void saveDischargeCoefficient(float coef) {
   
   if (coef >= FLOW_COEF_MIN && coef <= FLOW_COEF_MAX) {
     switch (valveType) {
@@ -448,7 +517,7 @@ void saveDischargeCoefficient(float coef) {
 }
 //////////////////////////////////////////////////////////////////////////
 
-void saveZeroCompensationFactor(float factor) {
+static void saveZeroCompensationFactor(float factor) {
   
   switch (valveType) {
     case VT_EXTRACT_AXIAL:
@@ -471,7 +540,7 @@ void saveZeroCompensationFactor(float factor) {
 }
 //////////////////////////////////////////////////////////////////////////
 
-void restoreZeroCompensationFactors() {
+static void restoreZeroCompensationFactors() {
   switch(valveType) {
     case VT_EXTRACT_AXIAL:
       compensationFactorEA = getFloat(ZERO_COMPENSATION_FACTOR_EA, 0.0);
@@ -493,12 +562,12 @@ void restoreZeroCompensationFactors() {
 }
 ////////////////////////////////////////////////////////////////////////// 
 
-float calculateZeroCompensationPressure() {
+static float calculateZeroCompensationPressure() {
   return getZeroCompensationFactor() * flowPressure.get();
 }
 //////////////////////////////////////////////////////////////////////////
 
-void initNextMode(ModeType type) {
+static void initNextMode(ModeType type) {
 
   modeType = type;
 
@@ -561,7 +630,7 @@ void initNextMode(ModeType type) {
 }
 //////////////////////////////////////////////////////////////////////////
 
-void on_button_short_click() {
+static void on_button_short_click() {
  
   switch (modeType) {
     
@@ -636,7 +705,7 @@ void on_button_short_click() {
 }
 //////////////////////////////////////////////////////////////////////////
 
-void on_button_long_click() {
+static void on_button_long_click() {
   // toggle direction
   // direction = !direction;
   // myPID.SetControllerDirection(direction ?  REVERSE : DIRECT);
@@ -658,7 +727,7 @@ void on_button_long_click() {
 }
 //////////////////////////////////////////////////////////////////////////
 
-void handle_rotary_button() {
+static void handle_rotary_button() {
   static unsigned long lastTimeButtonDown = 0;
   static bool wasButtonDown = false;
 
@@ -683,7 +752,7 @@ void handle_rotary_button() {
 }
 //////////////////////////////////////////////////////////////////////////
 
-void loopRotaryEncoder() {
+static void loopRotaryEncoder() {
   
   if (rotaryEncoder->encoderChanged()) {
     switch (modeType) {
@@ -754,7 +823,7 @@ void loopRotaryEncoder() {
 }
 //////////////////////////////////////////////////////////////////////////
 
-void readPressureSensors() {
+static void readPressureSensors() {
   
   if (ms10_passed == true) {
     ms10_passed = false;
@@ -782,74 +851,7 @@ void readPressureSensors() {
 }
 //////////////////////////////////////////////////////////////////////////
 
-void loop() {
-  static uint32_t loopcnt = 0;
-  static uint32_t loopCount = 0;
-  static uint32_t last_millis = 0;
-  uint32_t ms = millis();
-  
-  ++loopCount;
-  
-  readPressureSensors();
-
-  loopRotaryEncoder();
-
-  // every 100ms
-  if (ms >= last_millis + 100) {
-    last_millis = ms;
-
-    flow.add(getFlow(flowPressure.get(), temperatureAmbient.get(), pressureAmbient.get(), humidityAmbient.get()));
-    pidSetpoint = calculateZeroCompensationPressure(); 
-    pidInput = zeroPressure.get();
-    
-    pid.Compute();
-    // Apply PWM to fan
-    fan.setSpeed(pidOutput);
-
-    readPressureSensors();
-    
-    // every second
-    if (loopcnt % 10 == 0) {
-
-      // Only needed in forced mode! In normal mode, you can remove the next line.
-      bme280.takeForcedMeasurement(); // has no effect in normal mode
-      readPressureSensors();
-
-      // get the measurements from the BME280
-      pressureAmbient.add(bme280.readPressure()); // Pressure in Pa
-      readPressureSensors();
-      temperatureAmbient.add(bme280.readTemperature()); // Temperature in °C
-      readPressureSensors();
-      humidityAmbient.add(bme280.readHumidity()); // Humidity in %
-      readPressureSensors();
-
-      Serial.printf("delay: %u\n", millis() - ms);
-      Serial.printf("Loop count: %u\n", loopCount); // 168 loops/second
-      Serial.printf("Flow pressure: %.1f Pa\n", flowPressure.get());
-      Serial.printf("Zero presssure: %.1f Pa\n", zeroPressure.get());
-      Serial.printf("PWM fan dutycycle: %.1f%%\n", pidOutput/(((1 << PWM_RESOLUTION)-1) << PWM_DITHER_RESOLUTION) * 100);
-      loopCount = 0;
-      // 13ms
-      // Serial.printf("Loop duaration: %u\n", millis()- last_millis);
-    }
-    
-    // every 2 seconds
-    if (loopcnt++ % 20 == 0) {
-      if (modeType == MT_MEASURE 
-          || modeType == MT_TUNE_ZERO_COMPENSATION
-          || modeType == MT_CALIBRATE_FLOW
-          || pidTuneType == PID_TUNE_P
-          || pidTuneType == PID_TUNE_I
-          || pidTuneType == PID_TUNE_D
-        ) {
-        displayMeasurements(); // takes 42ms
-      }
-    }
-  }
-}
-//////////////////////////////////////////////////////////////////////////
-
-void initBME280(void) {
+static void initBME280(void) {
   
   if (bme280.begin(I2C_ADDRESS_BME280, &I2C_A)) {
 
@@ -1309,7 +1311,7 @@ static float getRho(float tempC, float absPressurePa, float humidityPct) {
  * @param absPressurePa Absolute air pressure in Pascal of the BME280.
  * @param humidityPct Relative humidity in % of the BME280.
  */
-float getFlow(float deltaP, float tempC, float absPressurePa, float humidityPct) {
+static float getFlow(float deltaP, float tempC, float absPressurePa, float humidityPct) {
     if (deltaP <= 0) return 0.0;
 
     // --- 1. get density air
