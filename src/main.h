@@ -12,8 +12,8 @@ extern VenturiConstants venturi;
 
 typedef enum {
   MT_SELECT = 0,
-  MT_SELECT_VALVE = 1,
-  MT_MEASURE = 2,
+  MT_MEASURE = 1,
+  MT_SELECT_VALVE = 2,
   MT_TUNE_ZERO_COMPENSATION = 3,
   MT_CALIBRATE_FLOW = 4,
   MT_TUNE_PID = 5,

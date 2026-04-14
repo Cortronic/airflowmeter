@@ -12,7 +12,7 @@ class Fan {
 public:
     Fan(int pin, int chan = FAN_PWM_CHAN, int freq = FAN_PWM_FREQ, int pwmResolution = FAN_PWM_RESOLUTION, int ditherResolution = FAN_DITHER_RESOLUTION);
     void begin();
-    IRAM_ATTR  void handleDither(); // should be periodically called to if dithering is enabled
+    void IRAM_ATTR handleDither(); // should be periodically called to if dithering is enabled
     void setSpeed(uint16_t speed);
     void setDither(uint8_t resolution);
     int getSpeed();

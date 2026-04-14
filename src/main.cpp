@@ -506,19 +506,19 @@ void initNextMode(ModeType type) {
     
     case MT_SELECT:
       numberSelector.setRange(1, 6,  1, true, 0);
-      numberSelector.setValue(MT_SELECT_VALVE);
-      displaySelectMode(MT_SELECT_VALVE);
+      numberSelector.setValue(MT_MEASURE);
+      displaySelectMode(MT_MEASURE);
       break;
+
+    case MT_MEASURE:
+      displayMeasurements();
+      break; 
 
     case MT_SELECT_VALVE:
       numberSelector.setRange(0, 3,  1, true, 0);
       numberSelector.setValue(valveType);
       displaySelectValveMode(valveType);
       break;
-
-    case MT_MEASURE:
-      displayMeasurements();
-      break; 
 
     case MT_TUNE_ZERO_COMPENSATION:
       numberSelector.setRange(ZERO_COMP_MIN, ZERO_COMP_MAX, ZERO_COMP_STEP, false, 3);
@@ -565,12 +565,12 @@ void on_button_short_click() {
  
   switch (modeType) {
     
-    case MT_MEASURE:
-      initNextMode(MT_SELECT_VALVE);
-      break;
-
     case MT_SELECT:
       initNextMode((ModeType)(uint8_t)numberSelector.getValue()); 
+      break;
+
+    case MT_MEASURE:
+      initNextMode(MT_SELECT_VALVE);
       break;
 
     case MT_SELECT_VALVE:
@@ -1159,15 +1159,15 @@ static void displaySelectMode(ModeType mtype) {
   display.clearDisplay();
   display.setTextSize(1);
 
-  if (mtype == MT_SELECT_VALVE) display.setTextColor(SH110X_BLACK, SH110X_WHITE);
+  if (mtype == MT_MEASURE)  display.setTextColor(SH110X_BLACK, SH110X_WHITE);
   display.setCursor(0, 1);
+  display.print("Back");
+  if (mtype == MT_MEASURE) display.setTextColor(SH110X_WHITE, SH110X_BLACK);
+
+  if (mtype == MT_SELECT_VALVE) display.setTextColor(SH110X_BLACK, SH110X_WHITE);
+  display.setCursor(0, 10);
   display.print("Select Valve");
   if (mtype == MT_SELECT_VALVE) display.setTextColor(SH110X_WHITE, SH110X_BLACK);
-
-  if (mtype == MT_MEASURE)  display.setTextColor(SH110X_BLACK, SH110X_WHITE);
-  display.setCursor(0, 10);
-  display.print("Measure Mode");
-  if (mtype == MT_MEASURE) display.setTextColor(SH110X_WHITE, SH110X_BLACK);
 
   if (mtype == MT_TUNE_ZERO_COMPENSATION) display.setTextColor(SH110X_BLACK, SH110X_WHITE);
   display.setCursor(0, 19);

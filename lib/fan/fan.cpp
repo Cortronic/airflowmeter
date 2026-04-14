@@ -21,7 +21,7 @@ void Fan::begin() {
 }
 
 // This function should be called periodically (e.g., every 100ms) if dithering is enabled.
-IRAM_ATTR void Fan::handleDither() {
+void IRAM_ATTR Fan::handleDither() {
   if (_enabled && _ditherResolution > 0) {
     // For duty cycle between _speed and _speed + 1 based on _ditherCounter and _ditherSpeed
     _ditherCounter = (_ditherCounter + 1) % (1 << _ditherResolution);
