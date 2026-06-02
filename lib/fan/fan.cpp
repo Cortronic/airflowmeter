@@ -24,16 +24,15 @@ void Fan::begin() {
 void IRAM_ATTR Fan::handleDither() {
   if (_enabled && _ditherResolution > 0) {
     // For duty cycle between _speed and _speed + 1 based on _ditherCounter and _ditherSpeed
-    _ditherCounter = (_ditherCounter + 1) % (1 << _ditherResolution);
-    uint16_t ditheredSpeed = _speed + (_ditherCounter < _ditherSpeed ? 1 : 0);
-    ledcWrite(_chan, ditheredSpeed);
+    _ditherCounter = (_ditherCounter + 1) % (1 << _ditherResolution); // Increment dither counter and wrap around based on dither resolution
+    ledcWrite(_chan, (_ditherSpeed > _ditherCounter ? _speed + 1 : _speed));
   }
 }
 
 void Fan::setSpeed(uint16_t speed) {
   if (_enabled) {
     if (_ditherResolution > 0) {
-      // If dithering is enabled, we will handle the actual speed in the setDither function
+      // If dithering is enabled, we will handle the actual speed setting in the handleDither function
       speed = speed >= _maxSpeed ? _maxSpeed : speed; 
       _speed = speed >> _ditherResolution;
       _ditherSpeed = speed & ((1 << _ditherResolution) - 1);
@@ -45,7 +44,7 @@ void Fan::setSpeed(uint16_t speed) {
   }
 }
 
-void Fan::setDither(uint8_t resolution) {
+void Fan::setDitherResolution(uint8_t resolution) {
   // Dithering is not directly supported by the ESP32 LEDC hardware, but it is here implemented in software if needed.
   // This function is a placeholder for enabling/disabling dithering if you choose to use it.
   _maxSpeed = ((1 << _pwmResolution) - 1) << resolution; // Update max speed based on new dither resolution
@@ -61,8 +60,4 @@ void Fan::setDither(uint8_t resolution) {
       ledcWrite(_chan, _speed);
     }
   }
-}
-
-int Fan::getSpeed() {
-    return _speed;
 }

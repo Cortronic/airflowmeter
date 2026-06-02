@@ -12,6 +12,7 @@
 #include <PID_v1.h>
 #include <Smoothed.h>
 #include "fan.h"
+#include "venturi.h"
 #include "main.h"
 
 // Pin definitions
@@ -49,16 +50,17 @@ AiEsp32RotaryEncoder *rotaryEncoder = new AiEsp32RotaryEncoder(ROTARY_ENCODER_A_
 AiEsp32RotaryEncoderNumberSelector numberSelector = AiEsp32RotaryEncoderNumberSelector();
 
 Fan fan(PWM_FAN_PIN, PWM_FAN_CHAN, PWM_FREQ, PWM_RESOLUTION, PWM_DITHER_RESOLUTION);
+// Venturi
+Venturi venturi;
 
 Preferences preferences;
 
 Smoothed<float> zeroPressure;
-Smoothed<float> flow;
 Smoothed<float> flowPressure;
-Smoothed<float> calibration;
 Smoothed<float> pressureAmbient;
 Smoothed<float> temperatureAmbient;
 Smoothed<float> humidityAmbient;
+Smoothed<float> calibration;
 
 /**
  * Two hardware I2C busses, one for the display, the BME280 and one SPD810 sensor.
@@ -77,16 +79,6 @@ Adafruit_SH1106G display(128, 64, &I2C_A);
 Adafruit_BME280  bme280;     
 hw_timer_t *timer0 = nullptr;
 volatile bool ms10_passed = false;
-
-VenturiConstants venturi = {
-  .inletDiameter = 0.076,
-  .throatDiameter = venturi.inletDiameter * 0.75f,
-  .areaInlet = (float)M_PI * powf(venturi.inletDiameter / 2.0, 2.0),
-  .areaThroat = (float)M_PI * powf(venturi.throatDiameter / 2.0, 2.0),
-  .betaRatio = venturi.throatDiameter / venturi.inletDiameter,
-  .betaCoefficient = 1.0f - powf(venturi.betaRatio, 4),
-  .dischargeCoefficient = 0.955
-};
 
 ModeType modeType = MT_MEASURE;
 ValveType valveType = VT_EXTRACT_RADIAL;
@@ -109,10 +101,10 @@ float compensationFactorER = 0.0;
 float compensationFactorSA = 0.0;
 float compensationFactorSR = 0.0;
 
-float flowFactorExtractAxial = venturi.dischargeCoefficient;
-float flowFactorExtractRadial = venturi.dischargeCoefficient;
-float flowFactorSupplyAxial = venturi.dischargeCoefficient;
-float flowFactorSupplyRadial = venturi.dischargeCoefficient;
+float flowFactorExtractAxial = 0.985;
+float flowFactorExtractRadial = 0.985;
+float flowFactorSupplyAxial = 0.985;
+float flowFactorSupplyRadial = 0.985;
 
 static void  loadPreferences();
 static void  setupRotaryEncoder();
@@ -132,8 +124,9 @@ static void  displayCoefficientFlow(float coef);
 static void  displayCoefficientZeroCompensation();
 static void  initBME280();
 static void  initSDP(SensirionI2CSdp&, TwoWire&);
-static float getFlow(float deltaP, float tempC, float absPressurePa, float humidityPct);
 static void  drawString(int16_t x, int16_t y, const String &text);
+static float getDischargeCoefficient();
+static void saveDischargeCoefficient(float coef);
 //////////////////////////////////////////////////////////////////////////
 
 // Interrupt Service Routine (ISR)
@@ -188,12 +181,11 @@ void setup() {
 
   Serial.println("setup smoothed average.");
   zeroPressure.begin(SMOOTHED_EXPONENTIAL, 2);
-  flow.begin(SMOOTHED_EXPONENTIAL, 2);
   flowPressure.begin(SMOOTHED_AVERAGE, 100);
-  calibration.begin(SMOOTHED_AVERAGE, 200);
   pressureAmbient.begin(SMOOTHED_AVERAGE, 40);
   humidityAmbient.begin(SMOOTHED_AVERAGE, 40);
   temperatureAmbient.begin(SMOOTHED_AVERAGE, 40);
+  calibration.begin(SMOOTHED_AVERAGE, 200);
 
   bme280.takeForcedMeasurement();
   pressureAmbient.add(bme280.readPressure());
@@ -239,7 +231,6 @@ void loop() {
   if (ms >= last_millis + 100) {
     last_millis = ms;
 
-    flow.add(getFlow(flowPressure.get(), temperatureAmbient.get(), pressureAmbient.get(), humidityAmbient.get()));
     pidSetpoint = calculateZeroCompensationPressure(); 
     pidInput = zeroPressure.get();
     
@@ -286,6 +277,12 @@ void loop() {
         displayMeasurements(); // takes 42ms
       }
     }
+
+     // every minute
+    if (loopcnt % 600 == 0) {
+       venturi.setRho(pressureAmbient.get(), temperatureAmbient.get(), humidityAmbient.get());
+       readPressureSensors();
+    }
   }
 }
 //////////////////////////////////////////////////////////////////////////
@@ -326,6 +323,8 @@ static void setupRotaryEncoder() {
 
 static void setValveType(ValveType type) {
   valveType = type;
+
+  venturi.setDischargeCoefficient(getDischargeCoefficient());
   
   switch(type) {
     case VT_EXTRACT_AXIAL:
@@ -362,33 +361,31 @@ static void saveFloat(const char* key, float value) {
 static void loadPreferences() {
   preferences.begin("airflow", true);
 
-  venturi.inletDiameter = preferences.getFloat(KEY_VENTURI_INLET_DIAMETER, venturi.inletDiameter);
-  venturi.throatDiameter = preferences.getFloat(KEY_VENTURI_THROAT_DIAMETER, venturi.inletDiameter * 0.75);
-  venturi.areaInlet = (float)M_PI * powf(venturi.inletDiameter / 2.0, 2.0);
-  venturi.areaThroat = (float)M_PI * powf(venturi.throatDiameter / 2.0, 2.0);
-  venturi.betaRatio = venturi.throatDiameter / venturi.inletDiameter;
-  venturi.betaCoefficient = 1.0 - powf(venturi.betaRatio, 4);
-  venturi.dischargeCoefficient = preferences.getFloat(KEY_VENTURI_CD, venturi.dischargeCoefficient);
-
   offsetZeroPressure = preferences.getFloat(OFFSET_ZERO_PRESSURE, 0.0);
   offsetFlowPressure = preferences.getFloat(OFFSET_FLOW_PRESSURE, 0.0);
 
   float temp = preferences.getFloat(FLOW_COEF_EXTRACT_AXIAL, 0.0);
   if (temp >= FLOW_COEF_MIN && temp <= FLOW_COEF_MAX) {
-    flowFactorExtractAxial = venturi.dischargeCoefficient * temp;
+    flowFactorExtractAxial = temp;
   }
   temp = preferences.getFloat(FLOW_COEF_EXTRACT_RADIAL, 0.0);
   if (temp >= FLOW_COEF_MIN && temp <= FLOW_COEF_MAX) {
-    flowFactorExtractRadial = venturi.dischargeCoefficient * temp;
+    flowFactorExtractRadial = temp;
   }
   temp = preferences.getFloat(FLOW_COEF_SUPPLY_AXIAL, 0.0);
   if (temp >= FLOW_COEF_MIN && temp <= FLOW_COEF_MAX) {
-    flowFactorSupplyAxial = venturi.dischargeCoefficient * temp;
+    flowFactorSupplyAxial = temp;
   }
   temp = preferences.getFloat(FLOW_COEF_SUPPLY_RADIAL, 0.0);
   if (temp >= FLOW_COEF_MIN && temp <= FLOW_COEF_MAX) {
-    flowFactorSupplyRadial = venturi.dischargeCoefficient * temp;
+    flowFactorSupplyRadial = temp;
   }
+
+  float inletDiameter = preferences.getFloat(KEY_VENTURI_INLET_DIAMETER, 0.076);
+  float throatDiameter = preferences.getFloat(KEY_VENTURI_THROAT_DIAMETER, 0.057);
+  venturi.begin(inletDiameter, throatDiameter, getDischargeCoefficient());
+  venturi.setSmoothedFlowFactor(preferences.getFloat(KEY_VENTURI_SMOOTHING_FACTOR, 0.02));
+
   compensationFactorEA = preferences.getFloat(ZERO_COMPENSATION_FACTOR_EA, 0.0);
   compensationFactorER = preferences.getFloat(ZERO_COMPENSATION_FACTOR_ER, 0.0);
   compensationFactorSA = preferences.getFloat(ZERO_COMPENSATION_FACTOR_SA, 0.0);
@@ -488,31 +485,6 @@ static void setZeroCompensationFactor(float factor) {
     case VT_SUPPLY_RADIAL:
       compensationFactorSR = factor; 
       break;
-  }
-}
-//////////////////////////////////////////////////////////////////////////
-
-static void saveDischargeCoefficient(float coef) {
-  
-  if (coef >= FLOW_COEF_MIN && coef <= FLOW_COEF_MAX) {
-    switch (valveType) {
-      case VT_EXTRACT_AXIAL:
-        flowFactorExtractAxial = venturi.dischargeCoefficient * coef;
-        saveFloat(FLOW_COEF_EXTRACT_AXIAL, coef);
-        break;
-      case VT_EXTRACT_RADIAL:
-        flowFactorExtractRadial = venturi.dischargeCoefficient * coef;
-        saveFloat(FLOW_COEF_EXTRACT_RADIAL, coef);
-        break;
-      case VT_SUPPLY_AXIAL:
-        flowFactorSupplyAxial = venturi.dischargeCoefficient * coef;
-        saveFloat(FLOW_COEF_SUPPLY_AXIAL, coef);
-        break;
-      case VT_SUPPLY_RADIAL:
-        flowFactorSupplyRadial = venturi.dischargeCoefficient * coef; 
-        saveFloat(FLOW_COEF_SUPPLY_RADIAL, coef);
-        break;
-    }
   }
 }
 //////////////////////////////////////////////////////////////////////////
@@ -776,18 +748,19 @@ static void loopRotaryEncoder() {
       case MT_CALIBRATE_FLOW:
         switch (valveType) {
           case VT_EXTRACT_AXIAL:
-            flowFactorExtractAxial = venturi.dischargeCoefficient * numberSelector.getValue();
+            flowFactorExtractAxial = numberSelector.getValue();
             break;
           case VT_EXTRACT_RADIAL:
-            flowFactorExtractRadial = venturi.dischargeCoefficient * numberSelector.getValue();
+            flowFactorExtractRadial = numberSelector.getValue();
             break;
           case VT_SUPPLY_AXIAL:
-            flowFactorSupplyAxial = venturi.dischargeCoefficient * numberSelector.getValue();
+            flowFactorSupplyAxial = numberSelector.getValue();
             break;
           case VT_SUPPLY_RADIAL:
-            flowFactorSupplyRadial = venturi.dischargeCoefficient * numberSelector.getValue();
+            flowFactorSupplyRadial = numberSelector.getValue();
             break;
         }
+        venturi.setDischargeCoefficient(numberSelector.getValue());
         displayCoefficientFlow(numberSelector.getValue());
         break;
 
@@ -845,7 +818,9 @@ static void readPressureSensors() {
     if (error) {
       Serial.print("Error trying to execute readMeasurement from FlowPressure");
     } else {
-      flowPressure.add(differentialPressure - offsetFlowPressure);
+      differentialPressure -= offsetFlowPressure;
+      flowPressure.add(differentialPressure);
+      venturi.update(differentialPressure);
     }
   }
 }
@@ -1119,7 +1094,7 @@ static void displayMeasurements() {
   readPressureSensors();
 
   // display flow
-  snprintf(message, sizeof(message),"%.1f", flow.get());
+  snprintf(message, sizeof(message),"%.1f", venturi.getSmoothedFlow());
   display.setFont(); // standaard font
   display.setTextSize(2);
   printAlignCenter(message, 63, 18);
@@ -1252,20 +1227,7 @@ static void  displaySelectValveMode(ValveType type) {
 }
 //////////////////////////////////////////////////////////////////////////
 
-/**
-  *                    ____________
-  *                  /  dP * T
-  * Q  = 0.0723  \  / ____________  (m³/s)
-  *               \/      Pabs
-  *
-  *                                  ____________ 
-  *                                 /  dP * T  
-  * Q = 3600 x 0.0723 = 260.28  \  / ____________  (m³/h)
-  *                              \/     Pabs
-  * 
-*/
-
-static float getValveCoefficient() {
+static float getDischargeCoefficient() {
 
   switch (valveType) {
     case VT_EXTRACT_AXIAL:
@@ -1281,56 +1243,23 @@ static float getValveCoefficient() {
 }
 //////////////////////////////////////////////////////////////////////////
 
-/**
- * Calculates the air density (Rho) based on temperature, pressure, and humidity.
- * @param tempC Temperature in Celsius of the BME280.
- * @param absPressurePa Absolute air pressure in Pascal of the BME280.
- * @param humidityPct Relative humidity in % of the BME280.
- */
-static float getRho(float tempC, float absPressurePa, float humidityPct) {
-
-    // --- 1. Air density calculate (humid air) ---
-    float T = tempC + 273.15; // Kelvin
-    float phi = humidityPct / 100.0;
-    
-    // Saturated vapor pressure (Magnus) and actual vapor pressure
-    float pSat = 610.78 * exp((17.27 * tempC) / (tempC + 237.3));
-    float pv = phi * pSat;
-    float pd = absPressurePa - pv;
-
-    // rho = (Pd / (Rd * T)) + (Pv / (Rv * T))
-    return (pd / (287.058 * T)) + (pv / (461.495 * T));
-}
-//////////////////////////////////////////////////////////////////////////
-
-// 
-/**
- * Calculates the air flow volumestroom (m3/h) compensated for temperature, pressure, and humidity.
- * @param deltaP The measured pressure of the SDP800 in Pascal (Pa).
- * @param tempC Temperature in Celsius of the BME280.
- * @param absPressurePa Absolute air pressure in Pascal of the BME280.
- * @param humidityPct Relative humidity in % of the BME280.
- */
-static float getFlow(float deltaP, float tempC, float absPressurePa, float humidityPct) {
-    if (deltaP <= 0) return 0.0;
-
-    // --- 1. get density air
-    float rho = getRho(tempC, absPressurePa, humidityPct);
-    // Serial.printf("Calculated air density: %.3f kg/m³\n", rho);
-
-    // --- 2. Venturi Constants ---
-    // const float D = 0.116;      // Inlet diameter (m)
-    // const float d = 0.087;      // Throat diameter (m)
-    // const float Cd = 0.975;     // Discharge coefficient (adjust after calibration)    
-    // const float beta = d / D;
-    // const float Cb = 1 - pow(beta, 4);
-    // const float A2 = (PI * pow(d, 2)) / 4.0;
-    
-    // The Flow Formule (Bernoulli + continuity)
-    // Q = Cd * A2 * sqrt( (2 * deltaP) / (rho * (1 - beta^4)) )
-    float velocityThroat = getValveCoefficient() * sqrt((2 * deltaP) / (rho * venturi.betaCoefficient));
-    float flowM3s = venturi.areaThroat * velocityThroat;
-
-    return flowM3s * 3600.0; // convert to m3/h
+static void saveDischargeCoefficient(float coef) {
+  
+  if (coef >= FLOW_COEF_MIN && coef <= FLOW_COEF_MAX) {
+    switch (valveType) {
+      case VT_EXTRACT_AXIAL:
+        saveFloat(FLOW_COEF_EXTRACT_AXIAL, coef);
+        break;
+      case VT_EXTRACT_RADIAL:
+        saveFloat(FLOW_COEF_EXTRACT_RADIAL, coef);
+        break;
+      case VT_SUPPLY_AXIAL:
+        saveFloat(FLOW_COEF_SUPPLY_AXIAL, coef);
+        break;
+      case VT_SUPPLY_RADIAL: 
+        saveFloat(FLOW_COEF_SUPPLY_RADIAL, coef);
+        break;
+    }
+  }
 }
 //////////////////////////////////////////////////////////////////////////

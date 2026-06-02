@@ -1,14 +1,5 @@
 
-typedef struct {
-  float inletDiameter; // Diameter of the inlet of the venturi in meters
-  float throatDiameter; // Diameter of the throat in meters
-  float areaInlet; // Cross-sectional area of the inlet in square meters
-  float areaThroat; // Cross-sectional area of the throat in square meters
-  float betaRatio; // Ratio of throat diameter to inlet diameter (dimensionless)
-  float betaCoefficient; // Coefficient for calculating beta ratio effects (1 - pow(betaRatio, 4))
-  float dischargeCoefficient; // Discharge coefficient of the venturi (dimensionless)
-} VenturiConstants;
-extern VenturiConstants venturi;
+#pragma once
 
 typedef enum {
   MT_SELECT = 0,
@@ -47,11 +38,10 @@ extern PidTuneType pidTuneType;
 #define FLOW_COEF_STEP 0.001
 #define FLOW_COEF_DEFAULT 0.965
 
-
 // preferences keys
 #define KEY_VENTURI_INLET_DIAMETER "inletDia"
 #define KEY_VENTURI_THROAT_DIAMETER "throadDia"
-#define KEY_VENTURI_CD "Cd"
+#define KEY_VENTURI_SMOOTHING_FACTOR "smoothFactor"
 #define OFFSET_ZERO_PRESSURE "offsetZero"
 #define OFFSET_FLOW_PRESSURE "offsetFlow"
 #define FLOW_COEF_EXTRACT_AXIAL "coefExtractAx"

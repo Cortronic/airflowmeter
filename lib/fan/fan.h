@@ -14,8 +14,11 @@ public:
     void begin();
     void IRAM_ATTR handleDither(); // should be periodically called to if dithering is enabled
     void setSpeed(uint16_t speed);
-    void setDither(uint8_t resolution);
-    int getSpeed();
+    void setSpeedPercent(float percent) { setSpeed((uint16_t)(percent * _maxSpeed / 100.0)); };
+    void setDitherResolution(uint8_t resolution);
+    uint16_t getSpeed() { return _speed; };
+    uint16_t getMaxSpeed() { return _maxSpeed; };
+    float getSpeedPercent() { return (float)_speed / _maxSpeed * 100.0; };
 
 private:
     bool     _enabled;
